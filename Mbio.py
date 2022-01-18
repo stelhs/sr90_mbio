@@ -47,6 +47,7 @@ class Server():
                           'state': state,
                           'prev_state': prevState})
 
+
     def mbioConfig(s):
         d = s.request('ioconfig',
                       {'io': s.mbio.name})
@@ -71,19 +72,62 @@ class Server():
 
 
 class Port():
+    class Blink():
+        def __init__(s, port, d1, d2, cnt):
+            s.port = port
+            s.d1 = d1
+            s.d2 = d2
+            if not s.d2:
+                s.d2 = s.d1
+            s.cnt = cnt
+            s.task = Task('port_%d_blinking' % s.port.num,
+                          lambda: s.port.gpio.setValue(0),
+                          autoremove = True)
+            s.task.setCb(s.doBlinking)
+            s.task.start()
+
+
+        def doBlinking(s):
+            mode = "d1"
+            s.port.gpio.setValue(1)
+            cnt = 0
+            while 1:
+                if mode == "d1":
+                    Task.sleep(s.d1)
+                    s.port.gpio.setValue(0)
+                    mode = "d2"
+                    cnt += 1
+                else:
+                    Task.sleep(s.d2)
+                    s.port.gpio.setValue(1)
+                    mode = "d1"
+                if s.cnt and cnt >= s.cnt:
+                    return
+
+
+        def stop(s):
+            s.task.remove()
+
+
     def __init__(s, mbio, pn, gpio):
         s.mbio = mbio
         s.num = pn
         s.gpio = gpio
+        s.blinking = None
 
 
     def setMode(s, mode):
+        s.reset()
+
+        if s.blinking:
+            s.blinkStop()
+
         if mode == 'in':
              s.gpio.setMode('in')
              s.gpio.setEventCb(s.mbio.inputEventCb)
              return
         if mode == 'out':
-            gpio.setMode('out')
+            s.gpio.setMode('out')
             return
 
 
@@ -91,8 +135,22 @@ class Port():
         return s.gpio.mode()
 
 
-    def setOutState(s, state):
+    def setState(s, state):
+        if s.blinking:
+            s.blinkStop()
+
         s.gpio.setValue(state)
+
+
+    def blink(s, d1, d2 = 0, cnt = None):
+        if s.blinking:
+            s.blinkStop()
+        s.blinking = Port.Blink(s, d1, d2, cnt)
+
+
+    def blinkStop(s):
+        s.blinking.stop()
+        s.blinking = None
 
 
     def reset(s):
@@ -105,7 +163,6 @@ class Mbio():
         pass
 
     def __init__(s):
-        s.lock = threading.Lock()
         s.log = Syslog("mbio")
         s.httpServer = HttpServer('0.0.0.0', 8890)
         s.httpServer.setReqCb("GET", "/io", s.httpReqIo)
@@ -119,7 +176,7 @@ class Mbio():
         s.server = Server(s)
         s.name = fileGetContent(".mbio_name")
 
-        s.setupTask = Task('setupPorts')
+        s.setupTask = Task('setupPorts', autoremove=True)
         s.setupTask.setCb(s.doSetupPorts)
         s.setupTask.start()
         Gpio.startEvents()
@@ -171,8 +228,7 @@ class Mbio():
                         port.setMode('out')
 
                 s.log.info("ports successfully configured")
-                s.setupTask.remove()
-                s.setupTask = Task('actualizeStates')
+                s.setupTask = Task('actualizeStates', autoremove=True)
                 s.setupTask.setCb(s.doActualizeState)
                 s.setupTask.start()
                 return
@@ -196,10 +252,9 @@ class Mbio():
                     state = row['state']
                     print("set port %d to state %d\n" % (pn, state));
                     port = s.portByNum(pn)
-                    port.setOutState(state)
+                    port.setState(state)
 
                 s.log.info("ports successfully actualized")
-                s.setupTask.remove()
                 s.setupTask = None
                 return
 
@@ -216,7 +271,6 @@ class Mbio():
     def inputEventCb(s, gpio, state, prevState):
         if (time.time() - s.startTime) < 5:
             return
-
         port = s.portByGpioNum(gpio.num)
         print('sendEvent %d' % port.num)
         s.server.sendEvent(port.num, state, prevState)
@@ -230,12 +284,8 @@ class Mbio():
         if 'state' not in args:
             return json.dumps({'status': 'error',
                                'reason': "agrument 'state' is absent"})
-        state = int(args['state'])
+        state = args['state']
         pn = int(args['port'])
-
-        if state != 0 and state != 1:
-            return json.dumps({'status': 'error',
-                               'reason': ("state is not correct. state = %d" % state)})
 
         port = s.portByNum(pn)
         if not port:
@@ -245,8 +295,42 @@ class Mbio():
             return json.dumps({'status': 'error',
                                'reason': "port number %d: incorrect mode: %s" % (pn, gpio.mode())})
 
+        if state != "0" and state != "1" and state != "blink":
+            return json.dumps({'status': 'error',
+                               'reason': ("state is not correct. state = %d" % state)})
+
+        if state == "blink":
+            if 'd1' not in args:
+                return json.dumps({'status': 'error',
+                                   'reason': "agrument 'd1' is absent where state = blink"})
+
+            d1 = int(args['d1'])
+            d2 = d1
+            cnt = None
+            if d1 <= 0:
+                return json.dumps({'status': 'error',
+                                   'reason': "d1 is not correct. d1 = %d" % d1})
+            if 'd2' in args:
+                d2 = int(args['d2'])
+                if d2 <= 0:
+                    return json.dumps({'status': 'error',
+                                       'reason': "d2 is not correct. d2 = %d" % d2})
+            if 'cnt' in args:
+                cnt = int(args['cnt'])
+                if cnt <= 0:
+                    return json.dumps({'status': 'error',
+                                       'reason': "cnt is not correct. cnt = %d" % cnt})
+
+            try:
+                port.blink(d1, d2, cnt)
+            except Gpio.Ex as e:
+                return json.dumps({'status': 'error',
+                                   'reason': "%s" % e})
+            return json.dumps({'status': 'ok'})
+
+
         try:
-            port.setState(state)
+            port.setState(int(state))
         except Gpio.Ex as e:
             return json.dumps({'status': 'error',
                                'reason': "%s" % e})

@@ -101,10 +101,7 @@ class Gpio():
         with s._lock:
             if s._timeoutTask:
                 s.log.debug('cancel setValueTimeout')
-                s._timeoutTask.stop()
                 s._timeoutTask.remove()
-                #s._timeoutTask.waitForRemoved()
-                Task.sleep(2000) #TODO
                 s._timeoutTask = None
 
         if s._fake:

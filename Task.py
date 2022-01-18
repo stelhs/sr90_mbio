@@ -19,10 +19,11 @@ class Task():
     lastId = 0
     tasksLock = threading.Lock()
 
-    def __init__(s, name, exitCb = None):
+    def __init__(s, name, exitCb = None, autoremove = False):
         s._name = name
         s._msgQueue = []
         s.exitCb = exitCb
+        s.autoremove = autoremove
 
         if Task.taskByName(name):
             raise Exception("Task with name '%s' is existed" % name)
@@ -90,7 +91,7 @@ class Task():
         try:
             if s.cb:
                 if s.cbArgs:
-                    s.cb((s.cbArgs))
+                    s.cb(s.cbArgs)
                 else:
                     s.cb()
             else:
@@ -102,12 +103,12 @@ class Task():
             s.log.error("Exception: %s" % trace)
             print("Task '%s' Exception:\n%s" % (s._name, trace))
             #s.telegram.send("stopped by exception: %s" % trace) TODO!!!!
-            if s.exitCb:
-                s.exitCb()
+
+        if s.exitCb:
+            s.exitCb()
 
         s.setState("stopped")
-
-        if s._removing:
+        if s.isRemoving() or s.autoremove:
             s.setState("removed")
             s.log.info("removed by flag")
             with Task.tasksLock:
@@ -138,12 +139,23 @@ class Task():
             with Task.tasksLock:
                 Task.listTasks.remove(s)
             s.setState("removed")
-            s.log.info("removed")
+            s.log.info("removed immediately")
             return
 
-        s.log.info("removing")
+        s.log.info("removing..")
+        s.stop()
         with s._lock:
             s._removing = True
+
+        while 1:
+            if s.state() == "removed":
+                return
+            s.sleep(100)
+
+
+    def isRemoving(s):
+        with s._lock:
+            return s._removing
 
 
     def name(s):
@@ -167,13 +179,6 @@ class Task():
     def state(s):
         with s._lock:
             return s._state
-
-
-    def waitForRemoved(s): #TODO !!
-        while 1:
-            if s.state() == "removed":
-                return
-            s.sleep(100)
 
 
     @staticmethod
