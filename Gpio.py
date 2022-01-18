@@ -17,15 +17,16 @@ class Gpio():
         if Gpio.gpioByPn(num):
             raise Gpio.Ex("GPIO %d already in used" % num)
 
-        s._pn = num
+        s._num = num
         s._mode = 'not_configured'
         s._fake = False
         s._timeoutTask = None
         s._lock = threading.Lock()
         s.eventCb = None
         s.prevVal = None
-        s.log = Syslog("gpio%d" % (s._pn))
+        s.log = Syslog("gpio%d" % (s._num))
         s._usedGpio.append(s)
+        s._of = None
 
         if os.path.exists('FAKE'):
             s._fake = True
@@ -43,8 +44,8 @@ class Gpio():
         return s._mode
 
 
-    def pn(s):
-        return s._pn;
+    def num(s):
+        return s._num;
 
 
     def fd(s):
@@ -57,17 +58,19 @@ class Gpio():
         if s._of:
             close(s._of)
 
-        if not os.path.exists("/sys/class/gpio/gpio%d" % s._pn):
-            filePutContent("/sys/class/gpio/unexport", "%d" % s._pn)
-            filePutContent("/sys/class/gpio/export", "%d" % s._pn)
+        if os.path.exists("/sys/class/gpio/gpio%d" % s._num):
+            filePutContent("/sys/class/gpio/unexport", "%d" % s._num)
 
-        filePutContent("/sys/class/gpio/gpio%d/direction" % s._pn, s._mode)
-        filePutContent("/sys/class/gpio1/gpio%d/edge" % s._pn, "both")
-        s._of = open("/sys/class/gpio/gpio%d/value" % s._pn, "r+")
+        if not os.path.exists("/sys/class/gpio/gpio%d" % s._num):
+            filePutContent("/sys/class/gpio/export", "%d" % s._num)
+
+        filePutContent("/sys/class/gpio/gpio%d/direction" % s._num, s._mode)
+        filePutContent("/sys/class/gpio/gpio%d/edge" % s._num, "both")
+        s._of = open("/sys/class/gpio/gpio%d/value" % s._num, "r+")
 
 
     def initFake(s):
-        s._fileName = "FAKE/GPIO%d_%s" % (s._pn, s._mode)
+        s._fileName = "FAKE/GPIO%d_%s" % (s._num, s._mode)
 
         if not os.path.exists(s._fileName):
             if s._mode == 'in':
@@ -90,10 +93,10 @@ class Gpio():
 
     def setValue(s, val):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._pn)
+            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
 
         if s._mode == 'in':
-            raise Gpio.Ex("Can't setValue() GPIO:%d configured as input" % s._pn)
+            raise Gpio.Ex("Can't setValue() GPIO:%d configured as input" % s._num)
 
         with s._lock:
             if s._timeoutTask:
@@ -126,7 +129,7 @@ class Gpio():
 
     def value(s):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._pn)
+            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
 
         if s._fake:
             val = s.valueFake()
@@ -138,7 +141,7 @@ class Gpio():
 
     def setValueTimeout(s, val, interval):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._pn)
+            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
 
         with s._lock:
             if s._timeoutTask:
@@ -157,7 +160,7 @@ class Gpio():
                 s._timeoutTask = None
             s.log.info("set to value '%d' by timeout: %d mS" % (val, interval))
 
-        task = Task.setTimeout('gpio_%s_%dmS' % (s._pn, interval), interval, timeout)
+        task = Task.setTimeout('gpio_%s_%dmS' % (s._num, interval), interval, timeout)
         with s._lock:
             s._timeoutTask = task
 
@@ -167,7 +170,7 @@ class Gpio():
             return
 
         if not s._of:
-            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._pn)
+            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._num)
 
         s.poll.register(s._of.fileno(), select.POLLPRI)
         s.eventCb = cb
@@ -178,20 +181,20 @@ class Gpio():
             return
 
         if not s._of:
-            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._pn)
+            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._num)
 
         s.poll.usregister(s._of.fileno())
         s.eventCb = None
 
 
     def __str__(s):
-        return "GPIO:%d_%s" % (s._pn, s._mode)
+        return "GPIO:%d_%s" % (s._num, s._mode)
 
 
     @staticmethod
-    def gpioByPn(pn):
+    def gpioByPn(num):
         for gpio in Gpio._usedGpio:
-            if gpio.pn() == pn:
+            if gpio.num() == num:
                 return gpio
         return None
 

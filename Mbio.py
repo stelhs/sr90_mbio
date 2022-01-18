@@ -8,6 +8,7 @@ import json
 import os, re
 import datetime
 import requests
+import time
 
 
 class Server():
@@ -69,6 +70,36 @@ class Server():
 
 
 
+class Port():
+    def __init__(s, mbio, pn, gpio):
+        s.mbio = mbio
+        s.num = pn
+        s.gpio = gpio
+
+
+    def setMode(s, mode):
+        if mode == 'in':
+             s.gpio.setMode('in')
+             s.gpio.setEventCb(s.mbio.inputEventCb)
+             return
+        if mode == 'out':
+            gpio.setMode('out')
+            return
+
+
+    def mode(s):
+        return s.gpio.mode()
+
+
+    def setOutState(s, state):
+        s.gpio.setValue(state)
+
+
+    def reset(s):
+        s.gpio.unsetEvent()
+
+
+
 class Mbio():
     class Ex(Exception):
         pass
@@ -79,12 +110,11 @@ class Mbio():
         s.httpServer = HttpServer('0.0.0.0', 8890)
         s.httpServer.setReqCb("GET", "/io", s.httpReqIo)
 
-        s.gpios = {}
-        c = fileGetContent(".gpios.json")
-        gpioTable = json.loads(c)
-        for portNum, gpioNum in gpioTable.items():
-            gpio = Gpio(gpioTable[portNum])
-            s.gpios[int(portNum)] = gpio
+        s.ports = []
+        portTable = s.portTable()
+        for portNum, gpioNum in portTable.items():
+            port = Port(s, portNum, Gpio(portTable[portNum]))
+            s.ports.append(port)
 
         s.server = Server(s)
         s.name = fileGetContent(".mbio_name")
@@ -92,27 +122,53 @@ class Mbio():
         s.setupTask = Task('setupPorts')
         s.setupTask.setCb(s.doSetupPorts)
         s.setupTask.start()
+        Gpio.startEvents()
+        s.startTime = time.time()
+
+
+    def portByGpioNum(s, gpioNum):
+        for port in s.ports:
+            if port.gpio.num == gpioNum:
+                return port
+        return None
+
+
+    def portByNum(s, pn):
+        for port in s.ports:
+            if port.num == pn:
+                return port
+        return None
+
+
+    def portTable(s):
+        list = {}
+        c = fileGetContent(".gpios.json")
+        portTable = json.loads(c)
+        for portNum, gpioNum in portTable.items():
+            list[int(portNum)] = int(gpioNum)
+        return list
 
 
     def doSetupPorts(s):
         while(1):
             try:
                 s.log.info("attempt to setup ports")
-                for gpio in s.gpios.values():
-                    if gpio.mode() == 'in':
-                        gpio.unsetEvent()
+                for port in s.ports:
+                    if port.mode() == 'in':
+                        port.reset()
 
                 conf = s.server.mbioConfig()
-                for portNum, name in conf['in'].items():
-                    pn = int(portNum)
-                    gpio = s.gpios[pn]
-                    gpio.setMode('in')
-                    gpio.setEventCb(s.inputEventCb)
+                if len(conf['in']):
+                    for portNum, name in conf['in'].items():
+                        pn = int(portNum)
+                        port = s.portByNum(pn)
+                        port.setMode('in')
 
-                for portNum, name in conf['out'].items():
-                    pn = int(portNum)
-                    gpio = s.gpios[pn]
-                    gpio.setMode('out')
+                if len(conf['out']):
+                    for portNum, name in conf['out'].items():
+                        pn = int(portNum)
+                        port = s.portByNum(pn)
+                        port.setMode('out')
 
                 s.log.info("ports successfully configured")
                 s.setupTask.remove()
@@ -132,7 +188,6 @@ class Mbio():
             try:
                 s.log.info("attempt to actualize ports")
                 stat = s.server.stat()
-                print(stat)
                 for row in stat['io_states'].values():
                     if row['io_name'] != s.name:
                         continue
@@ -140,7 +195,8 @@ class Mbio():
                     pn = row['port']
                     state = row['state']
                     print("set port %d to state %d\n" % (pn, state));
-                    s.setOutPortState(pn, state)
+                    port = s.portByNum(pn)
+                    port.setOutState(state)
 
                 s.log.info("ports successfully actualized")
                 s.setupTask.remove()
@@ -156,16 +212,14 @@ class Mbio():
             Task.sleep(2000)
 
 
-    def setOutPortState(s, pn, state):
-        if pn not in s.gpios:
-            raise Mbio.Ex("can't setOutState: gpio %d not exist" % pn)
-        gpio = s.gpios[pn]
-        gpio.setValue(state)
-
 
     def inputEventCb(s, gpio, state, prevState):
-        print('sendEvent')
-        s.server.sendEvent(gpio.pn(), state, prevState)
+        if (time.time() - s.startTime) < 5:
+            return
+
+        port = s.portByGpioNum(gpio.num)
+        print('sendEvent %d' % port.num)
+        s.server.sendEvent(port.num, state, prevState)
 
 
     def httpReqIo(s, args, body):
@@ -183,16 +237,16 @@ class Mbio():
             return json.dumps({'status': 'error',
                                'reason': ("state is not correct. state = %d" % state)})
 
-        if pn not in s.gpios.keys():
+        port = s.portByNum(pn)
+        if not port:
             return json.dumps({'status': 'error',
                                'reason': "port number %d is not exist" % pn})
-        gpio = s.gpios[pn]
-        if gpio.mode() != 'out':
+        if port.mode() != 'out':
             return json.dumps({'status': 'error',
                                'reason': "port number %d: incorrect mode: %s" % (pn, gpio.mode())})
 
         try:
-            gpio.setValue(state)
+            port.setState(state)
         except Gpio.Ex as e:
             return json.dumps({'status': 'error',
                                'reason': "%s" % e})
