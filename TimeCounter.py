@@ -20,7 +20,7 @@ class TimeCounter():
         s._endTime = 0
 
 
-    def time(s):
+    def duration(s):
         if not s._startTime:
             return 0
 

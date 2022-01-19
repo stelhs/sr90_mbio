@@ -100,7 +100,7 @@ class Task():
             s.log.info("stopped")
         except Exception as e:
             trace = traceback.format_exc()
-            s.log.error("Exception: %s" % trace)
+            s.log.err("Exception: %s" % trace)
             print("Task '%s' Exception:\n%s" % (s._name, trace))
             #s.telegram.send("stopped by exception: %s" % trace) TODO!!!!
 

@@ -4,7 +4,7 @@ class Syslog():
     def __init__(s, subsystemName):
         s._subsystem = subsystemName
 
-    def error(s, msg):
+    def err(s, msg):
         syslog.syslog(syslog.LOG_ERR, "%s ERROR: %s" % (s._subsystem, msg))
 
 

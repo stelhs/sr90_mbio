@@ -3,12 +3,11 @@ from Task import *
 from Syslog import *
 from HttpServer import *
 from TimeCounter import *
+from TermoSensor import *
 from Gpio import *
 import json
 import os, re
-import datetime
 import requests
-import time
 
 
 class Server():
@@ -83,11 +82,11 @@ class Port():
             s.task = Task('port_%d_blinking' % s.port.num,
                           lambda: s.port.gpio.setValue(0),
                           autoremove = True)
-            s.task.setCb(s.doBlinking)
+            s.task.setCb(s.do)
             s.task.start()
 
 
-        def doBlinking(s):
+        def do(s):
             mode = "d1"
             s.port.gpio.setValue(1)
             cnt = 0
@@ -166,6 +165,7 @@ class Mbio():
         s.log = Syslog("mbio")
         s.httpServer = HttpServer('0.0.0.0', 8890)
         s.httpServer.setReqCb("GET", "/io", s.httpReqIo)
+        s.httpServer.setReqCb("GET", "/stat", s.httpReqStat)
 
         s.ports = []
         portTable = s.portTable()
@@ -180,7 +180,8 @@ class Mbio():
         s.setupTask.setCb(s.doSetupPorts)
         s.setupTask.start()
         Gpio.startEvents()
-        s.startTime = time.time()
+        s.startTc = TimeCounter('start')
+        s.startTc.start()
 
 
     def portByGpioNum(s, gpioNum):
@@ -259,17 +260,17 @@ class Mbio():
                 return
 
             except Server.ReqEx as e:
-                s.log.error("mbio actualize ports error: %s" % e)
+                s.log.err("mbio actualize ports error: %s" % e)
                 print("mbio actualize ports error: %s" % e)
             except Mbio.Ex as e:
-                s.log.error("can't set out port: %s" % e)
+                s.log.err("can't set out port: %s" % e)
                 print("can't set out port: %s" % e)
             Task.sleep(2000)
 
 
 
     def inputEventCb(s, gpio, state, prevState):
-        if (time.time() - s.startTime) < 5:
+        if s.startTc.duration() < 5:
             return
         port = s.portByGpioNum(gpio.num)
         print('sendEvent %d' % port.num)
@@ -336,4 +337,17 @@ class Mbio():
                                'reason': "%s" % e})
 
         return json.dumps({'status': 'ok'})
+
+
+    def httpReqStat(s, args, body):
+        list = TermoSensor.list()
+        sensors = []
+        try:
+            for sensor in list:
+                sensors.append({'name': sensor.name, 'temperature': sensor.t()})
+        except Exception as e:
+            return json.dumps({'status': 'error',
+                               'reason': ("can't get termosensor, reason: %s" % e)})
+
+        return json.dumps({'status': 'ok', 'termo_sensors': sensors})
 
