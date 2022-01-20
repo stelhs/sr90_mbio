@@ -28,21 +28,26 @@ class TermoSensor():
         if s._fake:
             return float(fileGetContent(s._fakeFileName))
 
-        of = open("/sys/bus/w1/devices/%s/temperature" % name, "r")
+        of = open("/sys/bus/w1/devices/%s/w1_slave" % s.name, "r")
 
         for i in range(10):
             of.seek(0)
-            val = of.read().strip()
-            if not val:
+            c = of.read().strip()
+            res = re.search("t=([\d-]+)", c)
+            if not res:
                 Task.sleep(100)
                 continue
-
+            temperature = float(res.groups()[0]) / 1000.0
             of.close()
-            return float(int(val) / 1000)
+            return temperature
 
         err = "Can't read correct value. val = %d" % val
         s.log.err(err)
         raise TermoSensor.Ex(err)
+
+
+    def __str__(s):
+        return "%s: %.1f" % (s.name, s.t())
 
 
     @staticmethod
@@ -63,6 +68,14 @@ class TermoSensor():
             s = TermoSensor(name)
             TermoSensor.sensors.append(s)
         return TermoSensor.sensors
+
+
+    @staticmethod
+    def printList():
+        list = TermoSensor.list()
+        print("Termosensors list:")
+        for sensor in list:
+            print("\t%s" % sensor)
 
 
     @staticmethod

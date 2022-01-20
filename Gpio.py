@@ -178,7 +178,7 @@ class Gpio():
             return
 
         if not s._of:
-            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._num)
+            return
 
         s.poll.usregister(s._of.fileno())
         s.eventCb = None

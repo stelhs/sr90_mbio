@@ -31,6 +31,7 @@ class Task():
         s.log = Syslog("task_%s" % name)
         s.log.debug("created")
         s._lock = threading.Lock()
+        s._ev = threading.Event()
         with s._lock:
             Task.lastId += 1
             s._id = Task.lastId
@@ -62,6 +63,7 @@ class Task():
     def sendMessage(s, msg):
         with s._lock:
             s._msgQueue.append(msg)
+        s._ev.set()
 
 
     def message(s):
@@ -70,8 +72,13 @@ class Task():
                 return None
 
             msg = s._msgQueue[0]
-            s._msgQueue.remove(s._msgQueue[0])
+            s._msgQueue.remove(msg)
             return msg
+
+
+    def waitMessage(s, timeout = None):
+        s._ev.wait(timeout)
+        return s.message()
 
 
     def start(s):

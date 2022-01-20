@@ -14,12 +14,40 @@ class Server():
     class ReqEx(Exception):
         pass
 
+    class QueueItem():
+        def __init__(s, port, state, prevState):
+            s.port = port
+            s.state = state
+            s.prevState = prevState
+            s.time = time.time()
+
+
     def __init__(s, mbio):
         s.mbio = mbio
         c = fileGetContent(".server.json")
         inf = json.loads(c)
         s.host = inf['host']
         s.port = inf['port']
+        s.task = Task("mbio_sender")
+        s.task.setCb(s.doSender)
+        s.task.start()
+        s.lock = threading.Lock()
+        s.eventQueue = []
+        s.log = Syslog("Server")
+
+
+    def doSender(s):
+        while 1:
+            s.task.waitMessage(1000)
+            with s.lock:
+                if len(s.eventQueue) == 0:
+                    continue
+
+                item = s.eventQueue[0]
+                s.eventQueue.remove(item)
+
+            s.log.info("send %d:%d" % (item.port.num(), item.state))
+            s.sendEvent(item.port, item.state, item.prevState);
 
 
     def request(s, url, args = None):
@@ -39,17 +67,23 @@ class Server():
         return d
 
 
-    def sendEvent(s, portNum, state, prevState):
+    def sendEvent(s, port, state, prevState):
         return s.request('ioserver',
-                         {'io': s.mbio.name,
-                          'port': portNum,
+                         {'io': s.mbio.name(),
+                          'port': port.num(),
                           'state': state,
                           'prev_state': prevState})
 
 
+    def sendEventAsync(s, port, state, prevState):
+        with s.lock:
+            s.eventQueue.append(Server.QueueItem(port, state, prevState))
+        s.task.sendMessage(None)
+
+
     def mbioConfig(s):
         d = s.request('ioconfig',
-                      {'io': s.mbio.name})
+                      {'io': s.mbio.name()})
 
         if 'ports' not in d:
             raise Exception("incorrect mbio config: field 'ports' is absent, content: %s" % d)
@@ -79,7 +113,7 @@ class Port():
             if not s.d2:
                 s.d2 = s.d1
             s.cnt = cnt
-            s.task = Task('port_%d_blinking' % s.port.num,
+            s.task = Task('port_%d_blinking' % s.port.num(),
                           lambda: s.port.gpio.setValue(0),
                           autoremove = True)
             s.task.setCb(s.do)
@@ -108,14 +142,26 @@ class Port():
             s.task.remove()
 
 
+        def __str__(s):
+            return "(d1:%d, d2:%d, cnt:%d)" % (
+                    s.d1, s.d2, s.cnt)
+
+
     def __init__(s, mbio, pn, gpio):
         s.mbio = mbio
-        s.num = pn
+        s._num = pn
         s.gpio = gpio
         s.blinking = None
+        s.setName("")
+        s.log = Syslog("port%d" % s.num())
+
+
+    def num(s):
+        return s._num
 
 
     def setMode(s, mode):
+        s.log.info("set mode %s" % mode)
         s.reset()
 
         if s.blinking:
@@ -130,21 +176,45 @@ class Port():
             return
 
 
+    def setName(s, name):
+        s._name = name
+
+
+    def name(s):
+        return s._name
+
+
     def mode(s):
         return s.gpio.mode()
 
 
     def setState(s, state):
+        if s.gpio.mode() != "out":
+            s.log.err("Can't set state %s because port configured as %s" % (state, s.mode()))
+            return
+
+        s.log.info("set state %s" % state)
         if s.blinking:
             s.blinkStop()
 
         s.gpio.setValue(state)
 
 
-    def blink(s, d1, d2 = 0, cnt = None):
+    def state(s):
+        if s.gpio.mode() == "not_configured":
+            return "not_configured"
+
+        if s.blinking:
+            return "blinking %s" % s.blinking
+        return s.gpio.value()
+
+
+    def blink(s, d1, d2 = 0, cnt = 0):
+
         if s.blinking:
             s.blinkStop()
         s.blinking = Port.Blink(s, d1, d2, cnt)
+        s.log.info("run blinking %s" % s.blinking)
 
 
     def blinkStop(s):
@@ -156,6 +226,11 @@ class Port():
         s.gpio.unsetEvent()
 
 
+    def __str__(s):
+        return "(%s/%s.%s.%d): %s" % (
+                s.name(), s.mbio.name(), s.mode(), s.num(), s.state())
+
+
 
 class Mbio():
     class Ex(Exception):
@@ -163,8 +238,12 @@ class Mbio():
 
     def __init__(s):
         s.log = Syslog("mbio")
+        s._name = fileGetContent(".mbio_name")
+
         s.httpServer = HttpServer('0.0.0.0', 8890)
-        s.httpServer.setReqCb("GET", "/io", s.httpReqIo)
+        s.httpServer.setReqCb("GET", "/io/relay_set", s.httpReqIo)
+        s.httpServer.setReqCb("GET", "/io/input_get", s.httpReqInput)
+        s.httpServer.setReqCb("GET", "/io/relay_get", s.httpReqInput)
         s.httpServer.setReqCb("GET", "/stat", s.httpReqStat)
 
         s.ports = []
@@ -174,7 +253,7 @@ class Mbio():
             s.ports.append(port)
 
         s.server = Server(s)
-        s.name = fileGetContent(".mbio_name")
+        s.setState("started")
 
         s.setupTask = Task('setupPorts', autoremove=True)
         s.setupTask.setCb(s.doSetupPorts)
@@ -182,6 +261,18 @@ class Mbio():
         Gpio.startEvents()
         s.startTc = TimeCounter('start')
         s.startTc.start()
+
+
+    def setState(s, state):
+        s._state = state
+
+
+    def state(s):
+        return s._state
+
+
+    def name(s):
+        return s._name
 
 
     def portByGpioNum(s, gpioNum):
@@ -193,7 +284,7 @@ class Mbio():
 
     def portByNum(s, pn):
         for port in s.ports:
-            if port.num == pn:
+            if port.num() == pn:
                 return port
         return None
 
@@ -208,6 +299,7 @@ class Mbio():
 
 
     def doSetupPorts(s):
+        s.setState("setupPorts")
         while(1):
             try:
                 s.log.info("attempt to setup ports")
@@ -221,12 +313,14 @@ class Mbio():
                         pn = int(portNum)
                         port = s.portByNum(pn)
                         port.setMode('in')
+                        port.setName(name)
 
                 if len(conf['out']):
                     for portNum, name in conf['out'].items():
                         pn = int(portNum)
                         port = s.portByNum(pn)
                         port.setMode('out')
+                        port.setName(name)
 
                 s.log.info("ports successfully configured")
                 s.setupTask = Task('actualizeStates', autoremove=True)
@@ -241,22 +335,24 @@ class Mbio():
 
 
     def doActualizeState(s):
+        s.setState("actualizeState")
         while(1):
             try:
                 s.log.info("attempt to actualize ports")
                 stat = s.server.stat()
                 for row in stat['io_states'].values():
-                    if row['io_name'] != s.name:
+                    if row['io_name'] != s.name():
                         continue
 
-                    pn = row['port']
-                    state = row['state']
-                    print("set port %d to state %d\n" % (pn, state));
+                    pn = int(row['port'])
+                    state = int(row['state'])
                     port = s.portByNum(pn)
                     port.setState(state)
+                    s.log.info("actualizing: port %s" % port)
 
                 s.log.info("ports successfully actualized")
                 s.setupTask = None
+                s.setState("ready")
                 return
 
             except Server.ReqEx as e:
@@ -273,8 +369,8 @@ class Mbio():
         if s.startTc.duration() < 5:
             return
         port = s.portByGpioNum(gpio.num)
-        print('sendEvent %d' % port.num)
-        s.server.sendEvent(port.num, state, prevState)
+        s.log.info("input event port %s" % port)
+        s.server.sendEventAsync(port, state, prevState)
 
 
     def httpReqIo(s, args, body):
@@ -294,7 +390,7 @@ class Mbio():
                                'reason': "port number %d is not exist" % pn})
         if port.mode() != 'out':
             return json.dumps({'status': 'error',
-                               'reason': "port number %d: incorrect mode: %s" % (pn, gpio.mode())})
+                               'reason': "port number %d: incorrect mode: %s" % (pn, port.mode())})
 
         if state != "0" and state != "1" and state != "blink":
             return json.dumps({'status': 'error',
@@ -307,7 +403,7 @@ class Mbio():
 
             d1 = int(args['d1'])
             d2 = d1
-            cnt = None
+            cnt = 0
             if d1 <= 0:
                 return json.dumps({'status': 'error',
                                    'reason': "d1 is not correct. d1 = %d" % d1})
@@ -339,6 +435,10 @@ class Mbio():
         return json.dumps({'status': 'ok'})
 
 
+    def uptime(s):
+        return os.popen('uptime -p').read()
+
+
     def httpReqStat(s, args, body):
         list = TermoSensor.list()
         sensors = []
@@ -349,5 +449,28 @@ class Mbio():
             return json.dumps({'status': 'error',
                                'reason': ("can't get termosensor, reason: %s" % e)})
 
-        return json.dumps({'status': 'ok', 'termo_sensors': sensors})
+        return json.dumps({'status': 'ok',
+                           'termo_sensors': sensors,
+                           'uptime': s.uptime()})
 
+
+    def httpReqInput(s, args, body):
+        if 'port' not in args:
+            return json.dumps({'status': 'error',
+                               'reason': "agrument 'port' is absent"})
+
+        pn = int(args['port'])
+        port = s.portByNum(pn)
+        if not port:
+            return json.dumps({'status': 'error',
+                               'reason': "port number %d is not exist" % pn})
+
+        s.log.info("request current port state %s" % port)
+        return json.dumps({'status': 'ok', 'state': port.state()})
+
+
+    def printStat(s):
+        print("Mbio state: %s" % s.state())
+        print("Port list:")
+        for port in s.ports:
+            print("\t%s" % port)
