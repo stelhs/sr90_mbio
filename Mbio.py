@@ -353,6 +353,7 @@ class Mbio():
                 s.log.info("ports successfully actualized")
                 s.setupTask = None
                 s.setState("ready")
+                s.printStat()
                 return
 
             except Server.ReqEx as e:
