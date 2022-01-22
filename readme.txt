@@ -19,7 +19,7 @@ Configuring Raspberry Pi:
     /etc/dhcpcd.conf add:
 
     interface enxb827ebb4ab83
-    static ip_address=192.168.10.84
+    static ip_address=192.168.10.4
     static routers=192.168.10.1
     static domain_name_servers=8.8.8.8
     static domain_search=8.8.8.8

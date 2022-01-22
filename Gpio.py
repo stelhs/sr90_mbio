@@ -14,7 +14,7 @@ class Gpio():
 
     _usedGpio = []
     def __init__(s, num):
-        if Gpio.gpioByPn(num):
+        if Gpio.gpioByNum(num):
             raise Gpio.Ex("GPIO %d already in used" % num)
 
         s._num = num
@@ -58,13 +58,13 @@ class Gpio():
         if s._of:
             close(s._of)
 
-        if os.path.exists("/sys/class/gpio/gpio%d" % s._num):
-            filePutContent("/sys/class/gpio/unexport", "%d" % s._num)
-
         if not os.path.exists("/sys/class/gpio/gpio%d" % s._num):
             filePutContent("/sys/class/gpio/export", "%d" % s._num)
 
-        filePutContent("/sys/class/gpio/gpio%d/direction" % s._num, s._mode)
+        mode = fileGetContent("/sys/class/gpio/gpio%d/direction" % s._num).strip()
+        if mode != s._mode:
+            filePutContent("/sys/class/gpio/gpio%d/direction" % s._num, s._mode)
+
         filePutContent("/sys/class/gpio/gpio%d/edge" % s._num, "both")
         s._of = open("/sys/class/gpio/gpio%d/value" % s._num, "r+")
 
@@ -110,18 +110,14 @@ class Gpio():
 
 
     def valueFake(s):
-        val = fileGetContent(s._fileName)
-        if val.strip() == '1':
-            return 1
-        return 0
+        c = fileGetContent(s._fileName)
+        return int(c.strip())
 
 
     def valueReal(s):
         s._of.seek(0)
-        val = s._of.read()
-        if val.strip() == '1':
-            return 1
-        return 0
+        c = s._of.read()
+        return int(c.strip())
 
 
     def value(s):
@@ -189,7 +185,7 @@ class Gpio():
 
 
     @staticmethod
-    def gpioByPn(num):
+    def gpioByNum(num):
         for gpio in Gpio._usedGpio:
             if gpio.num() == num:
                 return gpio

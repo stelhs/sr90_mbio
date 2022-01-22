@@ -29,6 +29,7 @@ class Task():
             raise Exception("Task with name '%s' is existed" % name)
 
         s.log = Syslog("task_%s" % name)
+        s.log.mute('info')
         s.log.debug("created")
         s._lock = threading.Lock()
         s._ev = threading.Event()

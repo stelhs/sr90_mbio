@@ -15,11 +15,9 @@ class Server():
         pass
 
     class QueueItem():
-        def __init__(s, port, state, prevState):
+        def __init__(s, port, state):
             s.port = port
             s.state = state
-            s.prevState = prevState
-            s.time = time.time()
 
 
     def __init__(s, mbio):
@@ -42,22 +40,21 @@ class Server():
             with s.lock:
                 if len(s.eventQueue) == 0:
                     continue
-
                 item = s.eventQueue[0]
                 s.eventQueue.remove(item)
 
             s.log.info("send %d:%d" % (item.port.num(), item.state))
-            s.sendEvent(item.port, item.state, item.prevState);
+            try:
+                s.sendEvent(item.port, item.state);
+            except Exception as e:
+                s.log.err("Can't send event %d:%d, server disconnected. Message: %s" % (
+                            item.port.num(), item.state, e))
 
 
     def request(s, url, args = None):
         url = "http://%s:%d/%s" % (s.host, s.port, url)
-        try:
-            r = requests.get(url = url,
-                             params = args)
-            d = r.json()
-        except Exception as e:
-            raise Server.ReqEx("Server request error: %s" % e)
+        r = requests.get(url = url, params = args)
+        d = r.json()
 
         if 'status' not in d:
             raise Server.ReqEx("Incorrect JSON responce: 'status' field does absent")
@@ -67,17 +64,23 @@ class Server():
         return d
 
 
-    def sendEvent(s, port, state, prevState):
+    def sendEvent(s, port, state):
         return s.request('ioserver',
                          {'io': s.mbio.name(),
                           'port': port.num(),
-                          'state': state,
-                          'prev_state': prevState})
+                          'state': state})
 
 
-    def sendEventAsync(s, port, state, prevState):
+    def sendEventAsync(s, port, state):
+        now = round(time.time() * 1000)
+        if (now - port.lastTrigTime) <= port.delay():
+            s.log.info("skip event: port %d:%d, diff = %d" % (
+                        port.num(), state, (now - port.lastTrigTime))))
+            return
+
+        port.lastTrigTime = now
         with s.lock:
-            s.eventQueue.append(Server.QueueItem(port, state, prevState))
+            s.eventQueue.append(Server.QueueItem(port, state))
         s.task.sendMessage(None)
 
 
@@ -154,6 +157,8 @@ class Port():
         s.blinking = None
         s.setName("")
         s.log = Syslog("port%d" % s.num())
+        s._edge = 'all'
+        s.lastTrigTime = 0
 
 
     def num(s):
@@ -176,6 +181,22 @@ class Port():
             return
 
 
+    def setDelay(s, msec):
+        s._delay = msec
+
+
+    def delay(s):
+        return s._delay
+
+
+    def setEdge(s, edge):
+        s._edge = edge
+
+
+    def edge(s):
+        return s._edge
+
+
     def setName(s, name):
         s._name = name
 
@@ -196,7 +217,6 @@ class Port():
         s.log.info("set state %s" % state)
         if s.blinking:
             s.blinkStop()
-
         s.gpio.setValue(state)
 
 
@@ -206,6 +226,9 @@ class Port():
 
         if s.blinking:
             return "blinking %s" % s.blinking
+
+        if s.gpio.mode() == 'in':
+            return int(not s.gpio.value())
         return s.gpio.value()
 
 
@@ -238,7 +261,7 @@ class Mbio():
 
     def __init__(s):
         s.log = Syslog("mbio")
-        s._name = fileGetContent(".mbio_name")
+        s._name = fileGetContent(".mbio_name").strip()
 
         s.httpServer = HttpServer('0.0.0.0', 8890)
         s.httpServer.setReqCb("GET", "/io/relay_set", s.httpReqIo)
@@ -309,11 +332,15 @@ class Mbio():
 
                 conf = s.server.mbioConfig()
                 if len(conf['in']):
-                    for portNum, name in conf['in'].items():
+                    for portNum, pInfo in conf['in'].items():
                         pn = int(portNum)
                         port = s.portByNum(pn)
                         port.setMode('in')
-                        port.setName(name)
+                        port.setName(pInfo['name'])
+                        if 'delay' in pInfo:
+                            port.setDelay(pInfo['delay'])
+                        if 'edge' in pInfo:
+                            port.setEdge(pInfo['edge'])
 
                 if len(conf['out']):
                     for portNum, name in conf['out'].items():
@@ -371,7 +398,17 @@ class Mbio():
             return
         port = s.portByGpioNum(gpio.num)
         s.log.info("input event port %s" % port)
-        s.server.sendEventAsync(port, state, prevState)
+        if port.edge() == 'all':
+            s.server.sendEventAsync(port, state)
+            return
+
+        if port.edge() == 'rise' and prevState == 0 and state == 1:
+            s.server.sendEventAsync(port, state)
+            return
+
+        if port.edge() == 'fall' and prevState == 1 and state == 0:
+            s.server.sendEventAsync(port, state)
+            return
 
 
     def httpReqIo(s, args, body):
