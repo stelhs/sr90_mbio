@@ -75,7 +75,7 @@ class Server():
         now = round(time.time() * 1000)
         if (now - port.lastTrigTime) <= port.delay():
             s.log.info("skip event: port %d:%d, diff = %d" % (
-                        port.num(), state, (now - port.lastTrigTime))))
+                        port.num(), state, (now - port.lastTrigTime)))
             return
 
         port.lastTrigTime = now
