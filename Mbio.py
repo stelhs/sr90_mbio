@@ -282,8 +282,6 @@ class Mbio():
         s.setupTask.setCb(s.doSetupPorts)
         s.setupTask.start()
         Gpio.startEvents()
-        s.startTc = TimeCounter('start')
-        s.startTc.start()
 
 
     def setState(s, state):
@@ -331,6 +329,10 @@ class Mbio():
                         port.reset()
 
                 conf = s.server.mbioConfig()
+
+                s.startTc = TimeCounter('start')
+                s.startTc.start()
+
                 if len(conf['in']):
                     for portNum, pInfo in conf['in'].items():
                         pn = int(portNum)
