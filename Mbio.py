@@ -357,10 +357,10 @@ class Mbio():
                 s.setupTask.start()
                 return
 
-            except Server.ReqEx as e:
-                s.log.error("mbio setup ports error: %s" % e)
-                print("mbio setup ports error: %s" % e)
-            Task.sleep(2000)
+            except Exception as e:
+                s.log.err("mbio setup ports error: %s" % e)
+                print("mbio setup ports error: %s\n\n" % e)
+            Task.sleep(5000)
 
 
     def doActualizeState(s):
@@ -385,13 +385,13 @@ class Mbio():
                 s.printStat()
                 return
 
-            except Server.ReqEx as e:
-                s.log.err("mbio actualize ports error: %s" % e)
-                print("mbio actualize ports error: %s" % e)
             except Mbio.Ex as e:
                 s.log.err("can't set out port: %s" % e)
-                print("can't set out port: %s" % e)
-            Task.sleep(2000)
+                print("can't set out port: %s\n\n" % e)
+            except Exception as e:
+                s.log.err("mbio actualize ports error: %s" % e)
+                print("mbio actualize ports error: %s\n\n" % e)
+            Task.sleep(5000)
 
 
 
