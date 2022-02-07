@@ -159,6 +159,7 @@ class Port():
         s.log = Syslog("port%d" % s.num())
         s._edge = 'all'
         s.lastTrigTime = 0
+        s.setDelay(0)
 
 
     def num(s):
