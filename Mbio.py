@@ -274,6 +274,7 @@ class Mbio():
         s.httpServer.setReqCb("GET", "/io/input_get", s.httpReqInput)
         s.httpServer.setReqCb("GET", "/io/relay_get", s.httpReqInput)
         s.httpServer.setReqCb("GET", "/stat", s.httpReqStat)
+        s.httpServer.setReqCb("GET", "/battery", s.httpReqBattery)
 
         s.ports = []
         portTable = s.portTable()
@@ -498,6 +499,41 @@ class Mbio():
         return json.dumps({'status': 'ok',
                            'termo_sensors': sensors,
                            'uptime': s.uptime()})
+
+
+    def httpReqBattery(s, args, body):
+        v_step = 12.91 / 3089
+        c_step = 3.5 / 820
+        v = None
+        c = None
+        ttyLock = threading.Lock()
+        with ttyLock:
+            try:
+                with open('/dev/ttyUSB0') as f:
+                    for line in f:
+                        if v and c:
+                            break
+
+                        m = re.search('CH3:([0-9]+)', line)
+                        if m:
+                            val = int(m.groups()[0])
+                            v = round(val * v_step, 2)
+                            continue
+
+                        m = re.search('CH1:([0-9]+)', line)
+                        if m:
+                            val = int(m.groups()[0]) - 2970 # 2970 - Current 0A
+                            c = round(val * c_step, 2)
+                            continue
+
+            except Exception as e:
+                return json.dumps({'status': 'error',
+                                   'reason': str(e)});
+
+        return json.dumps({'voltage': v,
+                           'current': c,
+                           'status': 'ok',
+                           'reason': ''});
 
 
     def httpReqInput(s, args, body):

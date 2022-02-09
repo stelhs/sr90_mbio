@@ -45,8 +45,7 @@ class TermoSensor():
             except Exception as e:
                 err = "Can't read termosensor, reason: %s" % e
                 s.log.err(err)
-
-        raise TermoSensor.Ex(err)
+                raise TermoSensor.Ex(err)
 
 
     def __str__(s):
