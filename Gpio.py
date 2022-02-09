@@ -22,6 +22,7 @@ class Gpio():
         s._fake = False
         s._timeoutTask = None
         s._lock = threading.Lock()
+        s._gpioLock = threading.Lock()
         s.eventCb = None
         s.prevVal = None
         s.log = Syslog("gpio%d" % (s._num))
@@ -82,9 +83,10 @@ class Gpio():
 
 
     def setValueReal(s, val):
-        s._of.seek(0)
-        s._of.write("%d" % val)
-        s._of.flush()
+        with s._gpioLock:
+            s._of.seek(0)
+            s._of.write("%d" % val)
+            s._of.flush()
 
 
     def setValueFake(s, val):
@@ -115,8 +117,9 @@ class Gpio():
 
 
     def valueReal(s):
-        s._of.seek(0)
-        c = s._of.read()
+        with s._gpioLock:
+            s._of.seek(0)
+            c = s._of.read()
         return int(c.strip())
 
 
