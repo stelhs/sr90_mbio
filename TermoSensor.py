@@ -13,6 +13,7 @@ class TermoSensor():
         s.name = name
         s.log = Syslog("termo_sensor_%s" % name)
         s._fake = None
+        s.lock = threading.Lock()
 
         if os.path.exists('FAKE'):
             s._fake = True
@@ -28,21 +29,23 @@ class TermoSensor():
         if s._fake:
             return float(fileGetContent(s._fakeFileName))
 
-        of = open("/sys/bus/w1/devices/%s/w1_slave" % s.name, "r")
+        with s.lock:
+            try:
+                of = open("/sys/bus/w1/devices/%s/w1_slave" % s.name, "r")
+                for i in range(10):
+                    of.seek(0)
+                    c = of.read().strip()
+                    res = re.search("t=([\d-]+)", c)
+                    if not res:
+                        Task.sleep(100)
+                        continue
+                    temperature = float(res.groups()[0]) / 1000.0
+                    of.close()
+                    return temperature
+            except Exception as e:
+                err = "Can't read termosensor, reason: %s" % e
+                s.log.err(err)
 
-        for i in range(10):
-            of.seek(0)
-            c = of.read().strip()
-            res = re.search("t=([\d-]+)", c)
-            if not res:
-                Task.sleep(100)
-                continue
-            temperature = float(res.groups()[0]) / 1000.0
-            of.close()
-            return temperature
-
-        err = "Can't read correct value. val = %d" % val
-        s.log.err(err)
         raise TermoSensor.Ex(err)
 
 

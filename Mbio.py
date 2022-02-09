@@ -27,16 +27,21 @@ class Server():
         s.host = inf['host']
         s.port = inf['port']
         s.task = Task("mbio_sender")
-        s.task.setCb(s.doSender)
-        s.task.start()
         s.lock = threading.Lock()
         s.eventQueue = []
         s.log = Syslog("Server")
+        s.task.setCb(s.doSender)
+        s.task.start()
 
 
     def doSender(s):
         while 1:
-            s.task.waitMessage(1000)
+            with s.lock:
+                queueLen = len(s.eventQueue)
+
+            if not queueLen:
+                s.task.waitMessage(1000)
+
             with s.lock:
                 if len(s.eventQueue) == 0:
                     continue
@@ -73,12 +78,12 @@ class Server():
 
     def sendEventAsync(s, port, state):
         now = round(time.time() * 1000)
-        if (now - port.lastTrigTime) <= port.delay():
+        if (now - port.lastTrigTime[state]) <= port.delay():
             s.log.info("skip event: port %d:%d, diff = %d" % (
-                        port.num(), state, (now - port.lastTrigTime)))
+                        port.num(), state, (now - port.lastTrigTime[state])))
             return
 
-        port.lastTrigTime = now
+        port.lastTrigTime[state] = now
         with s.lock:
             s.eventQueue.append(Server.QueueItem(port, state))
         s.task.sendMessage(None)
@@ -158,7 +163,7 @@ class Port():
         s.setName("")
         s.log = Syslog("port%d" % s.num())
         s._edge = 'all'
-        s.lastTrigTime = 0
+        s.lastTrigTime = [0, 0]
         s.setDelay(0)
 
 
