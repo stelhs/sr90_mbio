@@ -4,6 +4,8 @@ from Syslog import *
 from HttpServer import *
 from TimeCounter import *
 from TermoSensor import *
+from Settings import *
+from BatteryMonitor import *
 from Gpio import *
 import json
 import os, re
@@ -266,6 +268,7 @@ class Mbio():
         pass
 
     def __init__(s):
+        s.settings = Settings()
         s.log = Syslog("mbio")
         s._name = fileGetContent(".mbio_name").strip()
 
@@ -289,6 +292,10 @@ class Mbio():
         s.setupTask.setCb(s.doSetupPorts)
         s.setupTask.start()
         Gpio.startEvents()
+
+        s.batteryMon = None
+        if s.settings.batteryMon:
+            s.batteryMon = BatteryMonitor()
 
 
     def setState(s, state):
@@ -502,33 +509,16 @@ class Mbio():
 
 
     def httpReqBattery(s, args, body):
-        v_step = 12.91 / 3089
-        c_step = 3.5 / 820
-        v = None
-        c = None
-        ttyLock = threading.Lock()
-        with ttyLock:
-            try:
-                with open('/dev/ttyUSB0') as f:
-                    for line in f:
-                        if v and c:
-                            break
+        if not s.batteryMon:
+            return json.dumps({'status': 'error',
+                               'reason': 'BatteryMonitor is not configured'});
 
-                        m = re.search('CH3:([0-9]+)', line)
-                        if m:
-                            val = int(m.groups()[0])
-                            v = round(val * v_step, 2)
-                            continue
+        v = s.batteryMon.voltage()
+        c = s.batteryMon.current()
 
-                        m = re.search('CH1:([0-9]+)', line)
-                        if m:
-                            val = int(m.groups()[0]) - 2970 # 2970 - Current 0A
-                            c = round(val * c_step, 2)
-                            continue
-
-            except Exception as e:
-                return json.dumps({'status': 'error',
-                                   'reason': str(e)});
+        if not v:
+            return json.dumps({'status': 'error',
+                               'reason': 'ADC error'});
 
         return json.dumps({'voltage': v,
                            'current': c,
