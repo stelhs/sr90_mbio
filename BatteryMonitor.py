@@ -1,3 +1,4 @@
+import os, re
 from Task import *
 
 
@@ -15,7 +16,7 @@ class BatteryMonitor():
 
         def round(s):
             s._q.sort()
-            return s._q[(len(s._q) / 2) - 1]
+            return s._q[int((len(s._q) / 2) - 1)]
 
 
         def clear(s):
@@ -70,12 +71,12 @@ class BatteryMonitor():
                 s._current = c
 
 
-    def voltage():
+    def voltage(s):
         with s.lock:
             return s._voltage
 
 
-    def current():
+    def current(s):
         with s.lock:
             return s._current
 
