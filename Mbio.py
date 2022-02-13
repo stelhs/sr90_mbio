@@ -106,6 +106,16 @@ class Server():
         return d['ports']
 
 
+    def termosensorsConfig(s):
+        d = s.request('termosensor_config',
+                      {'io': s.mbio.name()})
+
+        if 'list' not in d:
+            raise Exception("incorrect termosensor config: field 'list' is absent, content: %s" % d)
+
+        return d['list']
+
+
     def stat(s):
         d = s.request('stat')
         if 'io_states' not in d:
@@ -271,6 +281,7 @@ class Mbio():
         s.settings = Settings()
         s.log = Syslog("mbio")
         s._name = fileGetContent(".mbio_name").strip()
+        s.termosensors = {}
 
         s.httpServer = HttpServer('0.0.0.0', 8890)
         s.httpServer.setReqCb("GET", "/io/relay_set", s.httpReqIo)
@@ -278,6 +289,7 @@ class Mbio():
         s.httpServer.setReqCb("GET", "/io/relay_get", s.httpReqInput)
         s.httpServer.setReqCb("GET", "/stat", s.httpReqStat)
         s.httpServer.setReqCb("GET", "/battery", s.httpReqBattery)
+        s.httpServer.setReqCb("GET", "/termosensors", s.httpReqTermosensors)
 
         s.ports = []
         portTable = s.portTable()
@@ -289,7 +301,7 @@ class Mbio():
         s.setState("started")
 
         s.setupTask = Task('setupPorts', autoremove=True)
-        s.setupTask.setCb(s.doSetupPorts)
+        s.setupTask.setCb(s.doSetup)
         s.setupTask.start()
         Gpio.startEvents()
 
@@ -333,6 +345,30 @@ class Mbio():
         return list
 
 
+    def doSetup(s):
+        s.doSetupPorts()
+        s.doSetupTermosensors()
+        s.doActualizeState()
+        s.setupTask = None
+
+
+    def doSetupTermosensors(s):
+        s.setState("setupTermosensors")
+        while(1):
+            try:
+                s.log.info("attempt to setup termosensors")
+                conf = s.server.termosensorsConfig()
+                for addr in conf:
+                    t = TermoSensor(addr)
+                    s.termosensors[addr] = t
+                return
+
+            except Exception as e:
+                s.log.err("setup termosensors error: %s" % e)
+                print("setup termosensors error: %s\n\n" % e)
+            Task.sleep(5000)
+
+
     def doSetupPorts(s):
         s.setState("setupPorts")
         while(1):
@@ -366,9 +402,6 @@ class Mbio():
                         port.setName(name)
 
                 s.log.info("ports successfully configured")
-                s.setupTask = Task('actualizeStates', autoremove=True)
-                s.setupTask.setCb(s.doActualizeState)
-                s.setupTask.start()
                 return
 
             except Exception as e:
@@ -394,7 +427,6 @@ class Mbio():
                     s.log.info("actualizing: port %s" % port)
 
                 s.log.info("ports successfully actualized")
-                s.setupTask = None
                 s.setState("ready")
                 s.printStat()
                 return
@@ -494,17 +526,7 @@ class Mbio():
 
 
     def httpReqStat(s, args, body):
-        list = TermoSensor.list()
-        sensors = []
-        try:
-            for sensor in list:
-                sensors.append({'name': sensor.name, 'temperature': sensor.t()})
-        except Exception as e:
-            return json.dumps({'status': 'error',
-                               'reason': ("can't get termosensor, reason: %s" % e)})
-
         return json.dumps({'status': 'ok',
-                           'termo_sensors': sensors,
                            'uptime': s.uptime()})
 
 
@@ -524,6 +546,30 @@ class Mbio():
                            'current': c,
                            'status': 'ok',
                            'reason': ''});
+
+
+    def httpReqTermosensors(s, args, body):
+        if args and 'addr' in args:
+            addr = args['addr']
+            if not addr in s.termosensors:
+                return json.dumps({'status': 'error',
+                                   'reason': ('termosensor %s is not configured' % addr)});
+            t = s.termosensors[addr]
+            val = t.t()
+            if not val:
+                return json.dumps({'status': 'error',
+                                   'reason': ('termosensor %s error' % addr)});
+            return json.dumps({'status': 'ok',
+                               't': val});
+
+        list = {}
+        for addr, t in s.termosensors.items():
+            val = t.t()
+            if not val:
+                continue
+            list[addr] = val
+        return json.dumps({'status': 'ok',
+                           'list': list});
 
 
     def httpReqInput(s, args, body):

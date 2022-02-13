@@ -1,29 +1,9 @@
 import os, re
 from Task import *
+from Queue import *
 
 
 class BatteryMonitor():
-    class Queue():
-        def __init__(s, size):
-            s.size = size
-            s.clear()
-
-        def push(s, val):
-            s._q.append(val)
-            if len(s._q) > s.size:
-                s._q = s._q[1:]
-
-
-        def round(s):
-            s._q.sort()
-            return s._q[int((len(s._q) / 2) - 1)]
-
-
-        def clear(s):
-            s._q = []
-
-
-
     def __init__(s):
         s.task = Task('battery_monitor')
         s.task.setCb(s.do)
@@ -31,7 +11,7 @@ class BatteryMonitor():
         s.lock = threading.Lock()
         s._voltage = None
         s._current = None
-        s.voltageQueue = BatteryMonitor.Queue(5)
+        s.voltageQueue = Queue(10)
 
 
     def do(s):
@@ -63,12 +43,16 @@ class BatteryMonitor():
                 with s.lock:
                     s._voltage = None
                     s._current = None
+                    v = None
+                    c = None
                 continue
 
             with s.lock:
                 s.voltageQueue.push(v)
                 s._voltage = s.voltageQueue.round()
                 s._current = c
+                v = None
+                c = None
 
 
     def voltage(s):
