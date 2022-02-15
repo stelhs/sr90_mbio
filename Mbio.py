@@ -444,6 +444,8 @@ class Mbio():
     def inputEventCb(s, gpio, state, prevState):
         if s.startTc.duration() < 5:
             return
+        state = not state
+        prevState = not prevState
         port = s.portByGpioNum(gpio.num)
         s.log.info("input event port %s" % port)
         if port.edge() == 'all':
