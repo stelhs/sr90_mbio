@@ -60,6 +60,7 @@ class Server():
 
     def request(s, url, args = None):
         url = "http://%s:%d/%s" % (s.host, s.port, url)
+        #print("url = %s, args = %s" % (url, args))
         r = requests.get(url = url, params = args)
         d = r.json()
 
@@ -444,8 +445,8 @@ class Mbio():
     def inputEventCb(s, gpio, state, prevState):
         if s.startTc.duration() < 5:
             return
-        state = not state
-        prevState = not prevState
+        state = int(not state)
+        prevState = int(not prevState)
         port = s.portByGpioNum(gpio.num)
         s.log.info("input event port %s" % port)
         if port.edge() == 'all':
