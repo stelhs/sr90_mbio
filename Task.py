@@ -11,16 +11,20 @@ class TaskStopException(Exception):
 
 class Task():
     listTasks = []
-    _state = "stopped"
-    _removing = False
-    _tid = None
-    cb = None
+    listTasksLock = threading.Lock()
+
     log = Syslog("task")
     lastId = 0
-    tasksLock = threading.Lock()
+
+    listAsyncFunctions = {}
+    listAsyncLock = threading.Lock()
 
     def __init__(s, name, exitCb = None, autoremove = False):
         s._name = name
+        s.cb = None
+        s._state = "stopped"
+        s._tid = None
+        s._removing = False
         s._msgQueue = []
         s.exitCb = exitCb
         s.autoremove = autoremove
@@ -29,8 +33,8 @@ class Task():
             raise Exception("Task with name '%s' is existed" % name)
 
         s.log = Syslog("task_%s" % name)
-        s.log.mute('info')
-        s.log.debug("created")
+        #s.log.mute('info')
+        s.log.info("created")
         s._lock = threading.Lock()
         s._ev = threading.Event()
         with s._lock:
@@ -38,7 +42,7 @@ class Task():
             s._id = Task.lastId
             s._alive = False
 
-        with Task.tasksLock:
+        with Task.listTasksLock:
             s.listTasks.append(s)
 
 
@@ -68,6 +72,7 @@ class Task():
 
 
     def message(s):
+        s._ev.clear()
         with s._lock:
             if not len(s._msgQueue):
                 return None
@@ -77,12 +82,18 @@ class Task():
             return msg
 
 
-    def waitMessage(s, timeout = None):
-        s._ev.wait(timeout)
+    def waitMessage(s, timeoutSec = None):
+        for sec in range(timeoutSec):
+            s._ev.wait(1)
+            if s.isRemoving():
+                return s.message()
         return s.message()
 
 
     def start(s):
+        if s.state() != "stopped":
+            return
+
         s.log.info("start")
         t = threading.Thread(target=s.thread, daemon=True, args=(s._name, ))
         t.start()
@@ -97,13 +108,10 @@ class Task():
     def thread(s, name):
         s._tid = threading.get_ident()
         try:
-            if s.cb:
-                if s.cbArgs:
-                    s.cb(s.cbArgs)
-                else:
-                    s.cb()
+            if s.cbArgs:
+                s.cb(s.cbArgs)
             else:
-                s.do()
+                s.cb()
         except TaskStopException:
             s.log.info("stopped")
         except Exception as e:
@@ -113,14 +121,17 @@ class Task():
             #s.telegram.send("stopped by exception: %s" % trace) TODO!!!!
 
         if s.exitCb:
-            s.exitCb()
+            try:
+                s.exitCb()
+            except TaskStopException:
+                pass
 
         s.setState("stopped")
         if s.isRemoving() or s.autoremove:
+            with Task.listTasksLock:
+                Task.listTasks.remove(s)
             s.setState("removed")
             s.log.info("removed by flag")
-            with Task.tasksLock:
-                Task.listTasks.remove(s)
 
 
     def stop(s):
@@ -128,6 +139,15 @@ class Task():
             return
         s.log.info("stopping")
         s.setState("stopping")
+
+
+    def restart(s):
+        s.stop()
+        while 1:
+            s.sleep(100)
+            if s.state() == "stopped":
+                break
+        s.start()
 
 
     def pause(s):
@@ -144,7 +164,7 @@ class Task():
 
     def remove(s):
         if s.state() == "stopped":
-            with Task.tasksLock:
+            with Task.listTasksLock:
                 Task.listTasks.remove(s)
             s.setState("removed")
             s.log.info("removed immediately")
@@ -193,13 +213,13 @@ class Task():
     def doObserveTasks():
         ot = Task.observeTask
         while 1:
-            with Task.tasksLock:
+            with Task.listTasksLock:
                 for t in Task.listTasks:
                     if t.state() == "running":
                         t.checkForAlive()
 
             Task.sleep(10000)
-            with Task.tasksLock:
+            with Task.listTasksLock:
                 for t in Task.listTasks:
                     if t.state() != "running":
                         continue
@@ -220,7 +240,7 @@ class Task():
 
     @staticmethod
     def taskById(id):
-        with Task.tasksLock:
+        with Task.listTasksLock:
             for t in Task.listTasks:
                 if t.id() == id:
                     return t
@@ -229,7 +249,7 @@ class Task():
 
     @staticmethod
     def taskByTid(tid):
-        with Task.tasksLock:
+        with Task.listTasksLock:
             for t in Task.listTasks:
                 if t.tid() == tid:
                     return t
@@ -238,7 +258,7 @@ class Task():
 
     @staticmethod
     def taskByName(name):
-        with Task.tasksLock:
+        with Task.listTasksLock:
             for t in Task.listTasks:
                 if t.name() == name:
                     return t
@@ -250,6 +270,7 @@ class Task():
         tid = threading.get_ident()
         task = Task.taskByTid(tid)
         if not task:
+            print("sleep in not task %d" % interval)
             time.sleep(interval / 1000)
             return
 
@@ -268,6 +289,31 @@ class Task():
 
             if t <= 0:
                 break
+
+
+    @staticmethod
+    def asyncRunSingle(name, fn, exitCb = None):
+        with Task.listAsyncLock:
+            list = Task.listAsyncFunctions
+
+        if name in list:
+            with Task.listAsyncLock:
+                task = Task.listAsyncFunctions[name]
+            task.stop()
+            task.remove()
+            with Task.listAsyncLock:
+                Task.listAsyncFunctions.pop(name)
+
+        task = Task("Async_%s" % name, exitCb)
+        def do():
+            fn()
+            task.remove()
+        task.setCb(do)
+        task.start()
+        with Task.listAsyncLock:
+            Task.listAsyncFunctions[name] = task
+        return task
+
 
 
     def __str__(s):
@@ -294,8 +340,23 @@ class Task():
 
 
     @staticmethod
+    def setPeriodic(name, interval, cb):
+        task = Task('periodic_task_%s' % name)
+
+        def do():
+            nonlocal task
+            while 1:
+                task.sleep(interval)
+                cb()
+
+        task.setCb(do)
+        task.start()
+        return task
+
+
+    @staticmethod
     def printList():
-        with Task.tasksLock:
+        with Task.listTasksLock:
             for tsk in Task.listTasks:
                 print("%s" % tsk)
 

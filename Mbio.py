@@ -5,6 +5,7 @@ from HttpServer import *
 from TimeCounter import *
 from TermoSensor import *
 from Settings import *
+from UiNotifier import *
 from BatteryMonitor import *
 from Gpio import *
 import json
@@ -73,7 +74,7 @@ class Server():
 
 
     def sendEvent(s, port, state):
-        return s.request('ioserver',
+        return s.request('io/send_event',
                          {'io': s.mbio.name(),
                           'port': port.num(),
                           'state': state})
@@ -93,7 +94,7 @@ class Server():
 
 
     def mbioConfig(s):
-        d = s.request('ioconfig',
+        d = s.request('io/config',
                       {'io': s.mbio.name()})
 
         if 'ports' not in d:
@@ -108,7 +109,7 @@ class Server():
 
 
     def termosensorsConfig(s):
-        d = s.request('termosensor_config',
+        d = s.request('io/termosensor_config',
                       {'io': s.mbio.name()})
 
         if 'list' not in d:
@@ -124,18 +125,29 @@ class Server():
         return d
 
 
+    def destroy(s):
+        s.httpServer.destroy()
+
 
 class Port():
     class Blink():
-        def __init__(s, port, d1, d2, cnt):
+        def __init__(s, port, d1, d2, number):
             s.port = port
             s.d1 = d1
             s.d2 = d2
             if not s.d2:
                 s.d2 = s.d1
-            s.cnt = cnt
+            s.number = number
+            s.cnt = 0
+
+            def blinkFinished():
+                s.port.gpio.setValue(0)
+                with s.port._lock:
+                    s.port.blinking = None
+                s.port.mbio.uiUpdate(s.port, 0)
+
             s.task = Task('port_%d_blinking' % s.port.num(),
-                          lambda: s.port.gpio.setValue(0),
+                          blinkFinished,
                           autoremove = True)
             s.task.setCb(s.do)
             s.task.start()
@@ -144,18 +156,21 @@ class Port():
         def do(s):
             mode = "d1"
             s.port.gpio.setValue(1)
-            cnt = 0
             while 1:
                 if mode == "d1":
                     Task.sleep(s.d1)
-                    s.port.gpio.setValue(0)
+                    s.port.gpio.setValue(1)
+                    if s.d1 > 300:
+                        s.port.mbio.uiUpdate(s.port, 1)
                     mode = "d2"
-                    cnt += 1
                 else:
                     Task.sleep(s.d2)
-                    s.port.gpio.setValue(1)
+                    s.port.gpio.setValue(0)
+                    if s.d2 > 300:
+                        s.port.mbio.uiUpdate(s.port, 0)
                     mode = "d1"
-                if s.cnt and cnt >= s.cnt:
+                    s.cnt += 1
+                if s.number and s.cnt >= s.number:
                     return
 
 
@@ -164,11 +179,12 @@ class Port():
 
 
         def __str__(s):
-            return "(d1:%d, d2:%d, cnt:%d)" % (
-                    s.d1, s.d2, s.cnt)
+            return "(d1:%d, d2:%d, number:%d)" % (
+                    s.d1, s.d2, s.number)
 
 
     def __init__(s, mbio, pn, gpio):
+        s._lock = threading.Lock()
         s.mbio = mbio
         s._num = pn
         s.gpio = gpio
@@ -188,7 +204,7 @@ class Port():
         s.log.info("set mode %s" % mode)
         s.reset()
 
-        if s.blinking:
+        if s.isBlinking():
             s.blinkStop()
 
         if mode == 'in':
@@ -234,34 +250,45 @@ class Port():
             return
 
         s.log.info("set state %s" % state)
-        if s.blinking:
+        if s.isBlinking():
             s.blinkStop()
+
         s.gpio.setValue(state)
+        s.mbio.uiUpdate(s, state)
 
 
     def state(s):
         if s.gpio.mode() == "not_configured":
             return "not_configured"
 
-        if s.blinking:
-            return "blinking %s" % s.blinking
+        with s._lock:
+            if s.blinking:
+                return "blinking %s" % s.blinking
 
         if s.gpio.mode() == 'in':
             return int(not s.gpio.value())
         return s.gpio.value()
 
 
-    def blink(s, d1, d2 = 0, cnt = 0):
+    def isBlinking(s):
+        with s._lock:
+            return bool(s.blinking)
 
-        if s.blinking:
+
+    def blink(s, d1, d2 = 0, number = 0):
+
+        if s.isBlinking():
             s.blinkStop()
-        s.blinking = Port.Blink(s, d1, d2, cnt)
+
+        with s._lock:
+            s.blinking = Port.Blink(s, d1, d2, number)
         s.log.info("run blinking %s" % s.blinking)
 
 
     def blinkStop(s):
         s.blinking.stop()
-        s.blinking = None
+        with s._lock:
+            s.blinking = None
 
 
     def reset(s):
@@ -279,12 +306,12 @@ class Mbio():
         pass
 
     def __init__(s):
-        s.settings = Settings()
+        s.conf = Settings()
         s.log = Syslog("mbio")
         s._name = fileGetContent(".mbio_name").strip()
         s.termosensors = {}
 
-        s.httpServer = HttpServer('0.0.0.0', 8890)
+        s.httpServer = HttpServer(s.conf.httpListenHost, s.conf.httpListenPort)
         s.httpServer.setReqCb("GET", "/io/relay_set", s.httpReqIo)
         s.httpServer.setReqCb("GET", "/io/input_get", s.httpReqInput)
         s.httpServer.setReqCb("GET", "/io/relay_get", s.httpReqInput)
@@ -292,11 +319,15 @@ class Mbio():
         s.httpServer.setReqCb("GET", "/battery", s.httpReqBattery)
         s.httpServer.setReqCb("GET", "/termosensors", s.httpReqTermosensors)
 
+        s.uiCachedStates = {};
         s.ports = []
         portTable = s.portTable()
         for portNum, gpioNum in portTable.items():
             port = Port(s, portNum, Gpio(portTable[portNum]))
             s.ports.append(port)
+
+        s.ui = UiNotifier('io', s.conf.uiServerHost,
+                          s.conf.uiServerPort, s.conf.mbioHost)
 
         s.server = Server(s)
         s.setState("started")
@@ -307,8 +338,10 @@ class Mbio():
         Gpio.startEvents()
 
         s.batteryMon = None
-        if s.settings.batteryMon:
+        if s.conf.batteryMon:
             s.batteryMon = BatteryMonitor()
+
+        s.uiPingTask = Task.setPeriodic('uiPing', 1000, s.uiUpdate)
 
 
     def setState(s, state):
@@ -394,6 +427,7 @@ class Mbio():
                             port.setDelay(pInfo['delay'])
                         if 'edge' in pInfo:
                             port.setEdge(pInfo['edge'])
+                        s.uiCachedStates[port.name()] = port.state()
 
                 if len(conf['out']):
                     for portNum, name in conf['out'].items():
@@ -401,6 +435,7 @@ class Mbio():
                         port = s.portByNum(pn)
                         port.setMode('out')
                         port.setName(name)
+                        s.uiCachedStates[port.name()] = port.state()
 
                 s.log.info("ports successfully configured")
                 return
@@ -449,6 +484,7 @@ class Mbio():
         prevState = int(not prevState)
         port = s.portByGpioNum(gpio.num)
         s.log.info("input event port %s" % port)
+        s.uiUpdate(port, state)
         if port.edge() == 'all':
             s.server.sendEventAsync(port, state)
             return
@@ -462,7 +498,31 @@ class Mbio():
             return
 
 
-    def httpReqIo(s, args, body):
+    def uiUpdate(s, port = None, state = None):
+        if port:
+            s.uiCachedStates[port.name()] = state
+            s.uiPingTask.restart()
+
+        data = [];
+        for port in s.ports:
+            info = {'port_name': port.name(),
+                    'type': port.mode(),
+                    'state': s.uiCachedStates[port.name()]}
+            if port.mode() == 'out':
+                if port.isBlinking():
+                    with port._lock:
+                        blinking = port.blinking
+
+                    info['blinking'] = {'d1': round(blinking.d1 / 1000, 3),
+                                        'd2': round(blinking.d2 / 1000, 3),
+                                        'cnt': (blinking.number - blinking.cnt)}
+            data.append(info)
+        s.ui.notify('ioStatus',
+                    {'io_name': s.name(),
+                     'list': data})
+
+
+    def httpReqIo(s, args, body, attrs, conn):
         if 'port' not in args:
             return json.dumps({'status': 'error',
                                'reason': "agrument 'port' is absent"})
@@ -528,12 +588,12 @@ class Mbio():
         return os.popen('uptime -p').read()
 
 
-    def httpReqStat(s, args, body):
+    def httpReqStat(s, args, body, attrs, conn):
         return json.dumps({'status': 'ok',
                            'uptime': s.uptime()})
 
 
-    def httpReqBattery(s, args, body):
+    def httpReqBattery(s, args, body, attrs, conn):
         if not s.batteryMon:
             return json.dumps({'status': 'error',
                                'reason': 'BatteryMonitor is not configured'});
@@ -551,7 +611,7 @@ class Mbio():
                            'reason': ''});
 
 
-    def httpReqTermosensors(s, args, body):
+    def httpReqTermosensors(s, args, body, attrs, conn):
         if args and 'addr' in args:
             addr = args['addr']
             if not addr in s.termosensors:
@@ -575,7 +635,7 @@ class Mbio():
                            'list': list});
 
 
-    def httpReqInput(s, args, body):
+    def httpReqInput(s, args, body, attrs, conn):
         if 'port' not in args:
             return json.dumps({'status': 'error',
                                'reason': "agrument 'port' is absent"})
