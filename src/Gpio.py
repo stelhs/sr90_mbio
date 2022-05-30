@@ -2,33 +2,37 @@ import os, select
 from Task import *
 from common import *
 from Syslog import *
+from Exceptions import *
 
 
 
 class Gpio():
-    class Ex(Exception):
-        pass
-
     poll = select.poll()
     task = Task('gpio_events')
+    log = Syslog("gpios")
 
     _usedGpio = []
     def __init__(s, num):
-        if Gpio.gpioByNum(num):
-            raise Gpio.Ex("GPIO %d already in used" % num)
-
         s._num = num
         s._mode = 'not_configured'
         s._fake = False
         s._timeoutTask = None
-        s._lock = threading.Lock()
-        s._gpioLock = threading.Lock()
         s.eventCb = None
         s.prevVal = None
-        s.log = Syslog("gpio%d" % (s._num))
-        s._usedGpio.append(s)
         s._of = None
 
+        s._lock = threading.Lock()
+        s._gpioLock = threading.Lock()
+        s.log = Syslog("gpio%d" % (s._num))
+
+        try:
+            if Gpio.gpioByNum(num):
+                raise GpioNumberIsBusyError(s.log,
+                    "Can't register new GPIO %d: gpio already in used" % num)
+        except:
+            pass
+
+        s._usedGpio.append(s)
         if os.path.exists('FAKE'):
             s._fake = True
 
@@ -95,10 +99,12 @@ class Gpio():
 
     def setValue(s, val):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
+            raise GpioIncorrectStateError(s.log,
+                    "Can't setValue() GPIO:%d does not configured" % s._num)
 
         if s._mode == 'in':
-            raise Gpio.Ex("Can't setValue() GPIO:%d configured as input" % s._num)
+            raise GpioIncorrectStateError(s.log,
+                    "Can't setValue() GPIO:%d configured as input" % s._num)
 
         with s._lock:
             if s._timeoutTask:
@@ -125,7 +131,8 @@ class Gpio():
 
     def value(s):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
+            raise GpioIncorrectStateError(s.log,
+                    "Can't get value(), GPIO:%d does not configured" % s._num)
 
         if s._fake:
             val = s.valueFake()
@@ -137,7 +144,8 @@ class Gpio():
 
     def setValueTimeout(s, val, interval):
         if s._mode == 'not_configured':
-            raise Gpio.Ex("Can't setValue() GPIO:%d does not configured" % s._num)
+            raise GpioIncorrectStateError(s.log,
+                    "Can't setValueTimeou(), GPIO:%d does not configured" % s._num)
 
         with s._lock:
             if s._timeoutTask:
@@ -166,7 +174,8 @@ class Gpio():
             return
 
         if not s._of:
-            raise Gpio.Ex("Can't setEventCb(): GPIO:%d file does not opened" % s._num)
+            raise GpioNotConfiguredError(s.log,
+                    "Can't setEventCb(): GPIO:%d file does not opened" % s._num)
 
         s.poll.register(s._of.fileno(), select.POLLPRI)
         s.eventCb = cb
@@ -192,7 +201,8 @@ class Gpio():
         for gpio in Gpio._usedGpio:
             if gpio.num() == num:
                 return gpio
-        return None
+        raise GpioNotRegistredError(Gpio.log,
+                "gpioByNum() failed: Gpio with number '%s' is not registred" % num)
 
 
     @staticmethod
@@ -200,9 +210,8 @@ class Gpio():
         for gpio in Gpio._usedGpio:
             if gpio.fd() == fd:
                 return gpio
-
-        return None
-
+        raise GpioNotRegistredError(Gpio.log,
+                "gpioByFd() failed: Gpio with fd '%s' is not registred" % fd)
 
 
     @staticmethod

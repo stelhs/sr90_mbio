@@ -1,5 +1,5 @@
 
-class Queue():
+class AveragerQueue():
     def __init__(s, size):
         s.size = size
         s.clear()

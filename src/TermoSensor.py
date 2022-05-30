@@ -2,7 +2,7 @@ import re, os
 from Task import *
 from common import *
 from Syslog import *
-from Queue import *
+from AveragerQueue import *
 
 
 class TermoSensor():
@@ -12,7 +12,7 @@ class TermoSensor():
         s.lock = threading.Lock()
         s._fake = None
         s._t = None
-        s.queue = Queue(5)
+        s.queue = AveragerQueue(5)
 
         s.task = Task("termo_sensor_%s" % addr)
         s.task.setCb(s.do)

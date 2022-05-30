@@ -1,6 +1,6 @@
 import os, re
 from Task import *
-from Queue import *
+from AveragerQueue import *
 
 
 class BatteryMonitor():
@@ -11,7 +11,7 @@ class BatteryMonitor():
         s.lock = threading.Lock()
         s._voltage = None
         s._current = None
-        s.voltageQueue = Queue(10)
+        s.voltageQueue = AveragerQueue(10)
 
 
     def do(s):
@@ -38,7 +38,7 @@ class BatteryMonitor():
                             c = round(val * c_step, 2)
                             continue
 
-            except Exception as e:
+            except OSError as e:
                 Task.sleep(1000)
                 with s.lock:
                     s._voltage = None

@@ -19,6 +19,8 @@ class Task():
     listAsyncFunctions = {}
     listAsyncLock = threading.Lock()
 
+    taskErrorCb = None
+
     def __init__(s, name, exitCb = None, autoremove = False):
         s._name = name
         s.cb = None
@@ -65,7 +67,7 @@ class Task():
         s.setState("freezed")
 
 
-    def sendMessage(s, msg):
+    def sendMessage(s, msg=""):
         with s._lock:
             s._msgQueue.append(msg)
         s._ev.set()
@@ -82,11 +84,23 @@ class Task():
             return msg
 
 
-    def waitMessage(s, timeoutSec = None):
-        for sec in range(timeoutSec):
+    def dropMessages(s):
+        with s._lock:
+            s._msgQueue = []
+
+
+    def waitMessage(s, timeoutSec = 0):
+        sec = 0
+        while 1:
+            if timeoutSec and sec >= timeoutSec:
+                break
+            sec += 1
             s._ev.wait(1)
             if s.isRemoving():
                 return s.message()
+            msg = s.message()
+            if msg:
+                return msg
         return s.message()
 
 
@@ -116,9 +130,10 @@ class Task():
             s.log.info("stopped")
         except Exception as e:
             trace = traceback.format_exc()
-            s.log.err("Exception: %s" % trace)
-            print("Task '%s' Exception:\n%s" % (s._name, trace))
-            #s.telegram.send("stopped by exception: %s" % trace) TODO!!!!
+            s.log.err("Task %s Exception: %s" % (s.name(), trace))
+            print("Task %s Exception: %s" % (s.name(), trace))
+            if Task.taskErrorCb:
+                Task.taskErrorCb(s, trace)
 
         if s.exitCb:
             try:
@@ -210,6 +225,11 @@ class Task():
 
 
     @staticmethod
+    def setErrorCb(cb):
+        Task.taskErrorCb = cb
+
+
+    @staticmethod
     def doObserveTasks():
         ot = Task.observeTask
         while 1:
@@ -270,7 +290,7 @@ class Task():
         tid = threading.get_ident()
         task = Task.taskByTid(tid)
         if not task:
-            print("sleep in not task %d" % interval)
+#            print("sleep in not task %d" % interval)
             time.sleep(interval / 1000)
             return
 
