@@ -35,8 +35,8 @@ class Task():
             raise Exception("Task with name '%s' is existed" % name)
 
         s.log = Syslog("task_%s" % name)
-        #s.log.mute('info')
-        s.log.info("created")
+        s.log.mute('debug')
+        s.log.debug("created")
         s._lock = threading.Lock()
         s._ev = threading.Event()
         with s._lock:
@@ -108,7 +108,7 @@ class Task():
         if s.state() != "stopped":
             return
 
-        s.log.info("start")
+        s.log.debug("start")
         t = threading.Thread(target=s.thread, daemon=True, args=(s._name, ))
         t.start()
         s.setState("running")
@@ -127,7 +127,7 @@ class Task():
             else:
                 s.cb()
         except TaskStopException:
-            s.log.info("stopped")
+            s.log.debug("stopped")
         except Exception as e:
             trace = traceback.format_exc()
             s.log.err("Task %s Exception: %s" % (s.name(), trace))
@@ -146,13 +146,13 @@ class Task():
             with Task.listTasksLock:
                 Task.listTasks.remove(s)
             s.setState("removed")
-            s.log.info("removed by flag")
+            s.log.debug("removed by flag")
 
 
     def stop(s):
         if s.state() != "running":
             return
-        s.log.info("stopping")
+        s.log.debug("stopping")
         s.setState("stopping")
 
 
@@ -166,14 +166,14 @@ class Task():
 
 
     def pause(s):
-        s.log.info("paused")
+        s.log.debug("paused")
         s.setState("paused")
 
 
     def resume(s):
         if s.state() != "paused":
             return
-        s.log.info("resumed")
+        s.log.debug("resumed")
         s.setState("running")
 
 
@@ -182,10 +182,10 @@ class Task():
             with Task.listTasksLock:
                 Task.listTasks.remove(s)
             s.setState("removed")
-            s.log.info("removed immediately")
+            s.log.debug("removed immediately")
             return
 
-        s.log.info("removing..")
+        s.log.debug("removing..")
         s.stop()
         with s._lock:
             s._removing = True
@@ -216,7 +216,7 @@ class Task():
     def setState(s, state):
         with s._lock:
             s._state = state
-            s.log.info("set state %s" % state)
+            s.log.debug("set state %s" % state)
 
 
     def state(s):

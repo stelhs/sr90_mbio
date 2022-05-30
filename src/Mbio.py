@@ -20,27 +20,22 @@ class Mbio():
     def __init__(s):
         s.log = Syslog("Mbio")
         s.conf = Conf()
-
         s._name = fileGetContent(".mbio_name").strip()
 
-        s.termosensors = {}
+        s.termosensors = []
         s.ports = []
         s.cachedStates = {};
 
         s.tc = TelegramClient(s.conf.telegram)
         Task.setErrorCb(s.exceptionHandler)
 
-        portTable = s.portTable()
-        for portNum, gpioNum in portTable.items():
-            port = Port(s, portNum, Gpio(portTable[portNum]))
-            s.ports.append(port)
+        s.setState("started")
+        s.initGpios()
 
         s.sn = SkynetNotifier('io',
                               s.conf.mbio['skynetServer']['host'],
                               s.conf.mbio['skynetServer']['port'],
                               s.conf.mbio['host'])
-
-        Gpio.startEvents()
 
         s.batteryMon = None
         if s.conf.mbio['batteryMonitor']:
@@ -50,11 +45,19 @@ class Mbio():
 
         s.httpServer = HttpServer(s.conf.mbio['host'],
                                   s.conf.mbio['port'])
-
         s.httpHandlers = Mbio.HttpHandlers(s, s.httpServer)
-        s.setState("started")
         Task.asyncRunSingle('setup_mbio', s.doSetup)
 
+
+    def initGpios(s):
+        if s.state() != 'started':
+            return
+
+        portTable = s.portTable()
+        for portNum, gpioNum in portTable.items():
+            port = Port(s, portNum, Gpio(portTable[portNum]))
+            s.ports.append(port)
+        Gpio.startEvents()
 
 
     def exceptionHandler(s, task, errMsg):
@@ -102,11 +105,9 @@ class Mbio():
         s.doSetupPorts()
         s.doSetupTermosensors()
         s.doActualizeState()
-        print('setup finished')
 
 
     def doSetupPorts(s):
-        print('call doSetupPorts()')
         s.setState("setupPorts")
         while(1):
             s.log.info("attempt to setup ports")
@@ -131,6 +132,7 @@ class Mbio():
                 for portNum, pInfo in conf['in'].items():
                     pn = int(portNum)
                     port = s.portByNum(pn)
+                    port.reset()
                     port.setMode('in')
                     port.setName(pInfo['name'])
                     if 'delay' in pInfo:
@@ -142,6 +144,7 @@ class Mbio():
             if len(conf['out']):
                 for portNum, name in conf['out'].items():
                     pn = int(portNum)
+                    port.reset()
                     port = s.portByNum(pn)
                     port.setMode('out')
                     port.setName(name)
@@ -153,7 +156,6 @@ class Mbio():
 
 
     def doSetupTermosensors(s):
-        print('call doSetupTermosensors()')
         s.setState("setupTermosensors")
         while(1):
             try:
@@ -166,14 +168,16 @@ class Mbio():
                 Task.sleep(5000)
                 continue
 
-            for addr in conf:
-                t = TermoSensor(addr)
-                s.termosensors[addr] = t
+            for tSensor in s.termosensors:
+                tSensor.destroy()
+            s.termosensors = []
+
+            s.termosensors = [TermoSensor(addr) for addr in conf]
+            s.log.info("thermosensors successfully configured")
             return
 
 
     def doActualizeState(s):
-        print('call doActualizeState()')
         s.setState("actualizeState")
         while(1):
             try:
@@ -220,7 +224,7 @@ class Mbio():
         state = int(not state)
         prevState = int(not prevState)
         port = s.portByGpioNum(gpio.num)
-        s.log.info("input event port %s" % port)
+        s.log.debug("input event port %s" % port)
         s.skynetSendUpdate(port, state)
 
 
@@ -248,11 +252,11 @@ class Mbio():
             ports.append(info)
 
         tSensors = {}
-        for addr, t in s.termosensors.items():
-            val = t.t()
+        for tSensor in s.termosensors: # TODO
+            val = tSensor.t()
             if not val:
                 continue
-            tSensors[addr] = val
+            tSensors[tSensor.addr()] = val
 
         s.sn.notify('ioStatus',
                     {'name': s.name(),
@@ -343,6 +347,7 @@ class Mbio():
             s.httpServer.setReqHandler("GET", "/io/output_get", s.portGetStateHandler, ['pn'])
             s.httpServer.setReqHandler("GET", "/io/input_get", s.portGetStateHandler, ['pn'])
             s.httpServer.setReqHandler("GET", "/stat", s.statHandler)
+            s.httpServer.setReqHandler("GET", "/reset", s.resetHandler)
 
 
         def outputSetHandler(s, args, body, attrs, conn):
@@ -409,6 +414,11 @@ class Mbio():
             return {'uptime': s.mbio.uptime()}
 
 
+        def resetHandler(s, args, body, attrs, conn):
+            state = s.mbio.state()
+            if state != 'ready':
+                raise HttpHandlerError("Can't reset MBIO board. Current state is %s" % state)
+            Task.asyncRunSingle('setup_mbio', s.mbio.doSetup)
 
 
 
@@ -476,6 +486,7 @@ class Port():
         s.blinking = None
         s.setName("")
         s.log = Syslog("port%d" % s.num())
+        s.log.mute('debug')
         s._edge = 'all'
         s.lastTrigTime = [0, 0]
         s.setDelay(0)
@@ -486,7 +497,7 @@ class Port():
 
 
     def setMode(s, mode):
-        s.log.info("set mode %s" % mode)
+        s.log.debug("set mode %s" % mode)
         s.reset()
 
         if s.isBlinking():
@@ -534,7 +545,7 @@ class Port():
             s.log.err("Can't set state %s because port configured as %s" % (state, s.mode()))
             return
 
-        s.log.info("set state %s" % state)
+        s.log.debug("set state %s" % state)
         if s.isBlinking():
             s.blinkStop()
 
@@ -567,7 +578,7 @@ class Port():
 
         with s._lock:
             s.blinking = Port.Blink(s, d1, d2, number)
-        s.log.info("run blinking %s" % s.blinking)
+        s.log.debug("run blinking %s" % s.blinking)
 
 
     def blinkStop(s):
@@ -577,7 +588,7 @@ class Port():
 
 
     def reset(s):
-        s.gpio.unsetEvent()
+        s.gpio.reset()
 
 
     def __repr__(s):

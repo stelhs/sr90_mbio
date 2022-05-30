@@ -14,16 +14,17 @@ class Gpio():
     _usedGpio = []
     def __init__(s, num):
         s._num = num
-        s._mode = 'not_configured'
         s._fake = False
         s._timeoutTask = None
         s.eventCb = None
         s.prevVal = None
         s._of = None
+        s.setMode('not_configured')
 
         s._lock = threading.Lock()
         s._gpioLock = threading.Lock()
         s.log = Syslog("gpio%d" % (s._num))
+        s.log.mute('debug')
 
         try:
             if Gpio.gpioByNum(num):
@@ -62,6 +63,12 @@ class Gpio():
     def initReal(s):
         if s._of:
             close(s._of)
+
+        if s._mode == 'not_configured':
+            if os.path.exists("/sys/class/gpio/gpio%d" % s._num):
+                filePutContent("/sys/class/gpio/gpio%d/direction" % s._num, 'in')
+                filePutContent("/sys/class/gpio/unexport", "%d" % s._num)
+            return
 
         if not os.path.exists("/sys/class/gpio/gpio%d" % s._num):
             filePutContent("/sys/class/gpio/export", "%d" % s._num)
@@ -162,7 +169,7 @@ class Gpio():
 
             with s._lock:
                 s._timeoutTask = None
-            s.log.info("set to value '%d' by timeout: %d mS" % (val, interval))
+            s.log.debug("set to value '%d' by timeout: %d mS" % (val, interval))
 
         task = Task.setTimeout('gpio_%s_%dmS' % (s._num, interval), interval, timeout)
         with s._lock:
@@ -188,9 +195,20 @@ class Gpio():
         if not s._of:
             return
 
+        if not s.eventCb:
+            return
+
         s.poll.usregister(s._of.fileno())
         s.eventCb = None
 
+
+    def reset(s):
+        with s._lock:
+            task = s._timeoutTask
+            if task:
+                task.stop()
+        s.unsetEvent()
+        s.setMode('not_configured')
 
     def __str__(s):
         return "GPIO:%d_%s" % (s._num, s._mode)

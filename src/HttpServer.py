@@ -52,6 +52,7 @@ class HttpServer():
             httpConn = HttpServer.Connection(s, conn, addr, s._wwwDir)
             with s._lock:
                 s._connections.append(httpConn)
+            httpConn.run()
 
 
     def setReqHandler(s, method, page, cb, requiredFields=[], retJson=True):
@@ -130,10 +131,11 @@ class HttpServer():
             return None
 
         parts = lines[0].split()
-        if len(parts) < 2:
+        if len(parts) < 3:
             return None
 
-        version, code, codeText = parts
+        version = parts[0]
+        code = parts[1]
 
         attrs = {}
         for line in lines[1:]:
@@ -145,7 +147,7 @@ class HttpServer():
             val = row[1].strip()
             attrs[name] = val
 
-        return (version, code, codeText, attrs, body)
+        return (version, code, attrs, body)
 
 
     @staticmethod
@@ -170,9 +172,13 @@ class HttpServer():
             s._wwwDir = wwwDir
             s._name = "%s:%d" % (remoteAddr[0], remoteAddr[1])
             s.log = Syslog("http_connection_%s:%d" % (remoteAddr[0], remoteAddr[1]))
+            s.log.mute('debug')
             s._task = Task("http_connection_%s:%d" % (remoteAddr[0], remoteAddr[1]))
             s._keep_alive = False
             s._task.setCb(s.taskDo)
+
+
+        def run(s):
             s._task.start()
 
 
@@ -221,7 +227,7 @@ class HttpServer():
                         if name == 'Connection' and val == 'keep-alive':
                             s._keep_alive = True
 
-                    s.log.info("%s %s" % (method, url))
+                    s.log.debug("%s %s" % (method, url))
 
                     page, args = s.parseUrl(url)
                     if not args:
@@ -263,11 +269,11 @@ class HttpServer():
                         break
 
                     if subscriberSucessProcessed:
-                        s.log.info('response 200 OK')
+                        s.log.debug('response 200 OK')
                         s.respOk(content)
                     else:
                         if not s._wwwDir:
-                            s.log.info('response 404 ERROR')
+                            s.log.debug('response 404 ERROR')
                             s.resp404()
 
                         if url == '/':
@@ -275,11 +281,11 @@ class HttpServer():
 
                         fileName = "%s/%s" % (s._wwwDir, url)
                         if not os.path.exists(fileName):
-                            s.log.info('response 404 ERROR')
+                            s.log.debug('response 404 ERROR')
                             s.resp404()
                         else:
                             content = fileGetBinary(fileName)
-                            s.log.info('response 200 OK, file "%s" is exist' % fileName)
+                            s.log.debug('response 200 OK, file "%s" is exist' % fileName)
                             mimeType = s.mimeTypeByFileName(fileName)
                             s.respOk(content, mimeType)
 

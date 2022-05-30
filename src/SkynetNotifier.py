@@ -91,7 +91,7 @@ class SkynetNotifier():
             raise SkynetNotifierResponseError(s.log,
                         'No valid responce from UI server: %s' % resp)
 
-        version, respCode, respCodeText, attrs, body = parts
+        version, respCode, attrs, body = parts
         if version != 'HTTP/1.1':
             raise SkynetNotifierResponseError(s.log,
                         'Incorrect version of HTTP protocol: %s' % version)
