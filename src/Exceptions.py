@@ -1,20 +1,12 @@
-import traceback
+from sr90Exceptions import *
 
-class AppError(Exception):
-    def __init__(s, log, msg):
-        super().__init__(s, msg)
-        log.err("MBIO Exception: %s" % msg)
-
-
-
-class ConfigError(AppError):
-    pass
-
+# Board IO exceptions
 
 class PortNotRegistredError(AppError):
     pass
 
 
+# Skynet server connection errors
 
 class SkynetServerError(AppError):
     pass
@@ -30,23 +22,7 @@ class SkynetServerResponceError(SkynetServerError):
 
 
 
-class GpioError(AppError):
-    pass
-
-class GpioNotRegistredError(GpioError):
-    pass
-
-class GpioNotConfiguredError(GpioError):
-    pass
-
-class GpioNumberIsBusyError(GpioError):
-    pass
-
-class GpioIncorrectStateError(GpioError):
-    pass
-
-
-
+# Skynet notifier client errors
 
 class SkynetNotifierError(AppError):
     pass
@@ -62,10 +38,3 @@ class SkynetNotifierResponseError(SkynetNotifierError):
 
 
 
-# Telegram client errors
-
-class TelegramError(AppError):
-    pass
-
-class TelegramClientError(TelegramError):
-    pass

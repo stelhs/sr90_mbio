@@ -1,4 +1,5 @@
 import sys
+sys.path.append('sr90lib/')
 sys.path.append('src/')
 
 from math import *
@@ -7,6 +8,8 @@ readline.parse_and_bind('tab:complete')
 
 
 from Mbio import *
+
+mbio = Mbio()
 
 
 def exitCb():

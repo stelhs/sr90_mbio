@@ -3,9 +3,9 @@ from Task import *
 from Syslog import *
 from Exceptions import *
 from HttpServer import *
-from Conf import *
-from TimeCounter import *
-from TermoSensor import *
+from ConfMbio import *
+from TimerCounter import *
+from TermoSensorDs18b20 import *
 from TelegramClient import *
 from SkynetNotifier import *
 from BatteryMonitor import *
@@ -19,7 +19,7 @@ import requests
 class Mbio():
     def __init__(s):
         s.log = Syslog("Mbio")
-        s.conf = Conf()
+        s.conf = ConfMbio()
         s._name = fileGetContent(".mbio_name").strip()
 
         s.termosensors = []
@@ -27,7 +27,7 @@ class Mbio():
         s.cachedStates = {};
 
         s.tc = TelegramClient(s.conf.telegram)
-        Task.setErrorCb(s.exceptionHandler)
+        Task.setErrorCb(s.taskExceptionHandler)
 
         s.setState("started")
         s.initGpios()
@@ -41,7 +41,7 @@ class Mbio():
         if s.conf.mbio['batteryMonitor']:
             s.batteryMon = BatteryMonitor()
 
-        s.skynetPingTask = Task.setPeriodic('skynetPing', 1000, s.skynetSendUpdate)
+        s.skynetPingTask = Task.setPeriodic('skynetPing', 2000, s.skynetSendUpdate)
 
         s.httpServer = HttpServer(s.conf.mbio['host'],
                                   s.conf.mbio['port'])
@@ -60,9 +60,9 @@ class Mbio():
         Gpio.startEvents()
 
 
-    def exceptionHandler(s, task, errMsg):
+    def taskExceptionHandler(s, task, errMsg):
         s.tc.sendToChat('stelhs',
-                "Mbio Task '%s' error:\n%s" % (task.name(), errMsg))
+                "Mbio: task '%s' error:\n%s" % (task.name(), errMsg))
 
 
     def setState(s, state):
@@ -125,7 +125,7 @@ class Mbio():
                 Task.sleep(5000)
                 continue
 
-            s.startTc = TimeCounter('start')
+            s.startTc = TimerCounter('start')
             s.startTc.start()
 
             if len(conf['in']):
@@ -144,8 +144,8 @@ class Mbio():
             if len(conf['out']):
                 for portNum, name in conf['out'].items():
                     pn = int(portNum)
-                    port.reset()
                     port = s.portByNum(pn)
+                    port.reset()
                     port.setMode('out')
                     port.setName(name)
                     s.cachedStates[port.name()] = port.state()
@@ -172,7 +172,7 @@ class Mbio():
                 tSensor.destroy()
             s.termosensors = []
 
-            s.termosensors = [TermoSensor(addr) for addr in conf]
+            s.termosensors = [TermoSensorDs18b20(addr) for addr in conf]
             s.log.info("thermosensors successfully configured")
             return
 
@@ -259,7 +259,7 @@ class Mbio():
             tSensors[tSensor.addr()] = val
 
         s.sn.notify('ioStatus',
-                    {'name': s.name(),
+                    {'io_name': s.name(),
                      'ports': ports,
                      'termosensors': tSensors})
 
@@ -371,7 +371,7 @@ class Mbio():
 
                 d1 = int(args['d1'])
                 d2 = d1
-                cnt = 0
+                number = 0
                 if d1 <= 0:
                     raise HttpHandlerError("d1 is not correct. d1 = %d" % d1)
 
@@ -380,21 +380,21 @@ class Mbio():
                     if d2 <= 0:
                         raise HttpHandlerError("d2 is not correct. d2 = %d" % d2)
 
-                if 'cnt' in args:
-                    cnt = int(args['cnt'])
-                    if cnt <= 0:
-                        raise HttpHandlerError("cnt is not correct. cnt = %d" % cnt)
+                if 'number' in args:
+                    number = int(args['number'])
+                    if number <= 0:
+                        raise HttpHandlerError("'number' is not correct. number = %d" % number)
 
                 try:
-                    port.blink(d1, d2, cnt)
-                except GpioError as e: # TODO
+                    port.blink(d1, d2, number)
+                except AppError as e:
                     raise HttpHandlerError("Can't set blink state: %s" % e)
                 return
 
 
             try:
                 port.setState(int(state))
-            except GpioError as e:
+            except AppError as e:
                 raise HttpHandlerError("Can't set state: %s" % e)
             return
 
@@ -403,7 +403,9 @@ class Mbio():
             pn = int(args['pn'])
             try:
                 port = s.mbio.portByNum(pn)
-                return {'state': port.state()}
+                state = port.state()
+                s.mbio.cachedStates[port.name()] = state
+                return {'state': state}
             except PortNotRegistredError as e:
                 raise HttpHandlerError("Port pn:%d is not registred" % pn)
             except GpioError as e:
@@ -604,6 +606,5 @@ class Port():
 
 
 
-mbio = Mbio()
 
 
