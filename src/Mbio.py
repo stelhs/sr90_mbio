@@ -228,7 +228,7 @@ class Mbio():
         s.skynetSendUpdate(port, state)
 
 
-    def skynetSendUpdate(s, port = None, state = None):
+    def skynetSendUpdate(s, port=None, state=None):
         if s.state() != "ready":
             return
 
@@ -238,6 +238,9 @@ class Mbio():
 
         ports = [];
         for port in s.ports:
+            if not port.name():
+                continue
+
             info = {'port_name': port.name(),
                     'type': port.mode(),
                     'state': s.cachedStates[port.name()]}
@@ -262,6 +265,12 @@ class Mbio():
                     {'io_name': s.name(),
                      'ports': ports,
                      'termosensors': tSensors})
+
+        if port and state:
+            s.sn.notify('portTriggered',
+                        {'io_name': s.name(),
+                         'pn': port.num(),
+                         'state': state})
 
 
 
