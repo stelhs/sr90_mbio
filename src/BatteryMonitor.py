@@ -1,17 +1,33 @@
-import os, re
+import os, re, json
 from Task import *
 from AveragerQueue import *
 
 
 class BatteryMonitor():
-    def __init__(s):
-        s.task = Task('battery_monitor')
-        s.task.setCb(s.do)
-        s.task.start()
+    def __init__(s, mbio):
+        s.mbio = mbio
+        s.conf = mbio.conf.mbio['batteryMonitor']
         s.lock = threading.Lock()
         s._voltage = None
         s._current = None
+        s._prevVoltage = None
+        s._prevCurrent = None
+
+        if not s.conf["enabled"]:
+            return
+
         s.voltageQueue = AveragerQueue(10)
+        s.skynetUpdater = s.mbio.periodicNotifier.register("battery", s.skynetUpdateHandler, 2000)
+
+        s.task = Task('battery_monitor')
+
+        if s.conf["emulate"]:
+            s.task.setCb(s.emulateDo)
+            s.task.start()
+            return
+
+        s.task.setCb(s.do)
+        s.task.start()
 
 
     def do(s):
@@ -47,12 +63,59 @@ class BatteryMonitor():
                     c = None
                 continue
 
+
             with s.lock:
                 s.voltageQueue.push(v)
                 s._voltage = s.voltageQueue.round()
                 s._current = c
+
+            if s._voltage != s._prevVoltage or s._current != s._prevCurrent:
+                s.skynetUpdater.call()
+
+            with s.lock:
+                s._prevVoltage = s._voltage
+                s._prevCurrent = s._current
                 v = None
                 c = None
+
+
+    def emulateDo(s):
+        if not os.path.exists('FAKE/battery'):
+            data = {'voltage': 12.8,
+                    'current': 0.0}
+            filePutContent('FAKE/battery', json.dumps(data))
+
+        while True:
+            c = fileGetContent('FAKE/battery')
+            data = json.loads(c)
+            with s.lock:
+                s._voltage = float(data['voltage'])
+                s._current = float(data['current'])
+
+            if s._voltage != s._prevVoltage or s._current != s._prevCurrent:
+                s.skynetUpdater.call()
+
+            with s.lock:
+                s._prevVoltage = s._voltage
+                s._prevCurrent = s._current
+            Task.sleep(1000)
+
+
+    def skynetUpdateHandler(s):
+        data = {'io_name': s.mbio.name()}
+        ok = False
+        v = s.voltage()
+        if v != None:
+            data['voltage'] = v
+            ok = True
+
+        c = s.current()
+        if c != None:
+            data['current'] = c
+            ok = True
+
+        if ok:
+            s.mbio.sn.notify('batteryStatus', data)
 
 
     def voltage(s):

@@ -10,6 +10,7 @@ from TelegramClient import *
 from SkynetNotifier import *
 from BatteryMonitor import *
 from Gpio import *
+from PeriodicNotifier import *
 import json
 import os, re
 import requests
@@ -24,7 +25,6 @@ class Mbio():
 
         s.termosensors = []
         s.ports = []
-        s.cachedStates = {};
 
         s.tc = TelegramClient(s.conf.telegram)
         Task.setErrorCb(s.taskExceptionHandler)
@@ -32,16 +32,18 @@ class Mbio():
         s.setState("started")
         s.initGpios()
 
-        s.sn = SkynetNotifier('io',
+        s.sn = SkynetNotifier('mbio',
                               s.conf.mbio['skynetServer']['host'],
                               s.conf.mbio['skynetServer']['port'],
                               s.conf.mbio['host'])
 
-        s.batteryMon = None
-        if s.conf.mbio['batteryMonitor']:
-            s.batteryMon = BatteryMonitor()
+        s.periodicNotifier = PeriodicNotifier()
+        s.skynetPortsUpdater = s.periodicNotifier.register("ports", s.skynetUpdatePortsHandler, 2000)
+        s.skynetTermoUpdater = s.periodicNotifier.register("termosensors", s.skynetUpdateTermoHandler, 2000)
 
-        s.skynetPingTask = Task.setPeriodic('skynetPing', 2000, s.skynetSendUpdate)
+        s.batteryMon = None
+        if 'batteryMonitor' in s.conf.mbio:
+            s.batteryMon = BatteryMonitor(s)
 
         s.httpServer = HttpServer(s.conf.mbio['host'],
                                   s.conf.mbio['port'])
@@ -139,7 +141,6 @@ class Mbio():
                         port.setDelay(pInfo['delay'])
                     if 'edge' in pInfo:
                         port.setEdge(pInfo['edge'])
-                    s.cachedStates[port.name()] = port.state()
 
             if len(conf['out']):
                 for portNum, name in conf['out'].items():
@@ -148,7 +149,6 @@ class Mbio():
                     port.reset()
                     port.setMode('out')
                     port.setName(name)
-                    s.cachedStates[port.name()] = port.state()
 
             s.log.info("ports successfully configured")
             return
@@ -172,7 +172,7 @@ class Mbio():
                 tSensor.destroy()
             s.termosensors = []
 
-            s.termosensors = [TermoSensorDs18b20(addr) for addr in conf]
+            s.termosensors = [TermoSensorDs18b20(addr, s.termosensorHandler) for addr in conf]
             s.log.info("thermosensors successfully configured")
             return
 
@@ -218,6 +218,7 @@ class Mbio():
             s.printStat()
             return
 
+
     def inputEventCb(s, gpio, state, prevState):
         if s.startTc.duration() < 5:
             return
@@ -225,16 +226,21 @@ class Mbio():
         prevState = int(not prevState)
         port = s.portByGpioNum(gpio.num)
         s.log.debug("input event port %s" % port)
-        s.skynetSendUpdate(port, state)
+        s.port.setCachedState(state)
+        s.sn.notify('portTriggered',
+                    {'io_name': s.name(),
+                     'pn': port.num(),
+                     'state': state})
+        s.skynetPortsUpdater.call()
 
 
-    def skynetSendUpdate(s, port=None, state=None):
+    def termosensorHandler(s, ts, t):
+        s.skynetTermoUpdater.call()
+
+
+    def skynetUpdatePortsHandler(s):
         if s.state() != "ready":
             return
-
-        if port:
-            s.cachedStates[port.name()] = state
-            s.skynetPingTask.restart()
 
         ports = [];
         for port in s.ports:
@@ -243,7 +249,7 @@ class Mbio():
 
             info = {'port_name': port.name(),
                     'type': port.mode(),
-                    'state': s.cachedStates[port.name()]}
+                    'state': port.cachedState()}
             if port.mode() == 'out':
                 if port.isBlinking():
                     with port._lock:
@@ -254,24 +260,19 @@ class Mbio():
                                         'cnt': (blinking.number - blinking.cnt)}
             ports.append(info)
 
-        tSensors = {}
-        for tSensor in s.termosensors: # TODO
-            val = tSensor.t()
-            if not val:
-                continue
-            tSensors[tSensor.addr()] = val
-
-        s.sn.notify('ioStatus',
+        s.sn.notify('portsStates',
                     {'io_name': s.name(),
-                     'ports': ports,
-                     'termosensors': tSensors})
+                     'ports': ports})
 
-        if port and state:
-            s.sn.notify('portTriggered',
-                        {'io_name': s.name(),
-                         'pn': port.num(),
-                         'state': state})
 
+    def skynetUpdateTermoHandler(s):
+        termosensors = {}
+        for ts in s.termosensors:
+            termosensors[ts.addr()] = ts.t()
+
+        s.sn.notify('termoStates',
+                    {'io_name': s.name(),
+                     'termosensors': termosensors})
 
 
     def uptime(s):
@@ -413,7 +414,7 @@ class Mbio():
             try:
                 port = s.mbio.portByNum(pn)
                 state = port.state()
-                s.mbio.cachedStates[port.name()] = state
+                port.setCachedState(state)
                 return {'state': state}
             except PortNotRegistredError as e:
                 raise HttpHandlerError("Port pn:%d is not registred" % pn)
@@ -448,9 +449,10 @@ class Port():
 
             def blinkFinished():
                 s.port.gpio.setValue(0)
+                s.port.setCachedState(0)
                 with s.port._lock:
                     s.port.blinking = None
-                s.port.mbio.skynetSendUpdate(s.port, 0)
+                s.skynetPortsUpdater.call()
 
             s.task = Task('port_%d_blinking' % s.port.num(),
                           blinkFinished,
@@ -466,14 +468,16 @@ class Port():
                 if mode == "d1":
                     Task.sleep(s.d1)
                     s.port.gpio.setValue(1)
+                    s.port.setCachedState(1)
                     if s.d1 > 300:
-                        s.port.mbio.skynetSendUpdate(s.port, 1)
+                        s.skynetPortsUpdater.call()
                     mode = "d2"
                 else:
                     Task.sleep(s.d2)
                     s.port.gpio.setValue(0)
+                    s.port.setCachedState(0)
                     if s.d2 > 300:
-                        s.port.mbio.skynetSendUpdate(s.port, 0)
+                        s.skynetPortsUpdater.call()
                     mode = "d1"
                     s.cnt += 1
                 if s.number and s.cnt >= s.number:
@@ -501,6 +505,7 @@ class Port():
         s._edge = 'all'
         s.lastTrigTime = [0, 0]
         s.setDelay(0)
+        s._cachedState = s.state()
 
 
     def num(s):
@@ -561,7 +566,8 @@ class Port():
             s.blinkStop()
 
         s.gpio.setValue(state)
-        s.mbio.skynetSendUpdate(s, state)
+        s._cachedState = state
+        s.mbio.skynetPortsUpdater.call()
 
 
     def state(s):
@@ -575,6 +581,14 @@ class Port():
         if s.gpio.mode() == 'in':
             return int(not s.gpio.value())
         return s.gpio.value()
+
+
+    def setCachedState(s, state):
+        s._cachedState = state
+
+
+    def cachedState(s):
+        return s._cachedState
 
 
     def isBlinking(s):
