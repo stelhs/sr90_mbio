@@ -65,7 +65,7 @@ class Mbio():
 
     def taskExceptionHandler(s, task, errMsg):
         s.tc.sendToChat('stelhs',
-                "Mbio: task '%s' error:\n%s" % (task.name(), errMsg))
+                "%s: task '%s' error:\n%s" % (s.name(), task.name(), errMsg))
 
 
     def setState(s, state):
