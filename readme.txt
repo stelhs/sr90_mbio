@@ -41,8 +41,8 @@ Configuring Raspberry Pi:
 
     run: mount -o remount,ro /boot
 
-11) automount USB storage
 
+11) automount USB storage
     mkdir /storage
     scp raspbian/udev/80-usb_storage.rules root@192.168.10.103:/etc/udev/rules.d/
     scp raspbian/udev/mount_storage.sh root@192.168.10.103:/root/
@@ -55,7 +55,23 @@ Configuring Raspberry Pi:
     sudo udevadm control --reload
 
 
-12) Задать статический IP адрес
+12) vim ~/.bashrc
+        alias gst='git status'
+        alias gl='git log'
+        alias ga='git add'
+        alias gc='git commit -m'
+        alias gp='git pull --rebase && git push'
+        alias gull='git pull --rebase'
+        alias gush='git push'
+        alias gb='git branch'
+        alias gco='git checkout'
+        alias gd='git diff'
+
+13) vim ~/.vimrc
+        vim ~/.vimrc
+
+
+14) Задать статический IP адрес
     setup ip address:
     /etc/dhcpcd.conf add:
 
@@ -65,10 +81,21 @@ Configuring Raspberry Pi:
     static domain_name_servers=8.8.8.8
     static domain_search=8.8.8.8
 
-13) clone sources https://github.com/stelhs/sr90_mbio.git into /root/sr90_mbio
-14) setup .gpios.json, .mbio_name, .server.json
+15) clone sources
+    cd /root
+    git clone https://github.com/stelhs/sr90_mbio.git
+    cd sr90_mbio
+    git checkout redesign_for_new_skynet
+    git clone https://github.com/stelhs/sr90lib.git
+    git clone https://github.com/stelhs/mbio_config.git configs
+    cd configs
+    git checkout mbio4
+
+16) setup .gpios.json, .mbio_name, .server.json
     cp /root/sr90_mbio/defaults/.* /root/sr90_mbio
 
-15) /etc/rc.local add:
+17) /etc/rc.local add:
         sleep 10
         screen -dmS mbio bash -c "cd /root/sr90_mbio; python3 -i mbio.py; exec bash"
+
+

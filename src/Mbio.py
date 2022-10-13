@@ -21,7 +21,8 @@ class Mbio():
     def __init__(s):
         s.log = Syslog("Mbio")
         s.conf = ConfMbio()
-        s._name = fileGetContent(".mbio_name").strip()
+
+        s._name = s.conf.mbio['name']
 
         s.termosensors = []
         s.ports = []
