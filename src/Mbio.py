@@ -192,10 +192,7 @@ class Mbio():
 
             try:
                 for row in stat:
-                    if row['io_name'] != s.name():
-                        continue
-
-                    pn = int(row['port'])
+                    pn = int(row['pn'])
                     state = int(row['state'])
                     port = s.portByNum(pn)
                     port.setState(state)
@@ -339,7 +336,7 @@ class Mbio():
     def outPortStates(s):
         try:
             d = s.serverRequest('io/out_port_states', {'io': s.name()})
-            return d['ports']
+            return d['listStates']
         except KeyError as e:
             raise SkynetServerResponceError(s.log,
                     "field %s is absent in responce for outPortStates(). Response: %s" % (e, d)) from e
@@ -440,6 +437,7 @@ class Port():
     class Blink():
         def __init__(s, port, d1, d2, number):
             s.port = port
+            s.skynetPortsUpdater = port.mbio.skynetPortsUpdater
             s.d1 = d1
             s.d2 = d2
             if not s.d2:
@@ -455,9 +453,9 @@ class Port():
                 s.skynetPortsUpdater.call()
 
             s.task = Task('port_%d_blinking' % s.port.num(),
+                          s.do,
                           blinkFinished,
                           autoremove = True)
-            s.task.setCb(s.do)
             s.task.start()
 
 
@@ -520,11 +518,13 @@ class Port():
             s.blinkStop()
 
         if mode == 'in':
-             s.gpio.setMode('in')
-             s.gpio.setEventCb(s.mbio.inputEventCb)
-             return
+            s.gpio.setMode('in')
+            s.gpio.setEventCb(s.mbio.inputEventCb)
+            s._cachedState = s.state()
+            return
         if mode == 'out':
             s.gpio.setMode('out')
+            s._cachedState = s.state()
             return
 
 

@@ -22,11 +22,11 @@ class BatteryMonitor():
         s.task = Task('battery_monitor')
 
         if s.conf["emulate"]:
-            s.task.setCb(s.emulateDo)
+            s.task.setFn(s.emulateDo)
             s.task.start()
             return
 
-        s.task.setCb(s.do)
+        s.task.setFn(s.do)
         s.task.start()
 
 
