@@ -358,7 +358,7 @@ class Mbio():
             s.httpServer.setReqHandler("GET", "/reset", s.resetHandler)
 
 
-        def outputSetHandler(s, args, body, attrs, conn):
+        def outputSetHandler(s, args, conn):
             pn = int(args['pn'])
             state = args['state']
 
@@ -407,7 +407,7 @@ class Mbio():
             return
 
 
-        def portGetStateHandler(s, args, body, attrs, conn):
+        def portGetStateHandler(s, args, conn):
             pn = int(args['pn'])
             try:
                 port = s.mbio.portByNum(pn)
@@ -420,11 +420,11 @@ class Mbio():
                 raise HttpHandlerError("Can't get state: %s" % e)
 
 
-        def statHandler(s, args, body, attrs, conn):
+        def statHandler(s, args, conn):
             return {'uptime': s.mbio.uptime()}
 
 
-        def resetHandler(s, args, body, attrs, conn):
+        def resetHandler(s, args, conn):
             state = s.mbio.state()
             if state != 'ready':
                 raise HttpHandlerError("Can't reset MBIO board. Current state is %s" % state)
