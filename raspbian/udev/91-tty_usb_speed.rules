@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="usb-serial", RUN+="/bin/bash -c '/root/set_tty_usb_speed.sh'"

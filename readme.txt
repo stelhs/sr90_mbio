@@ -50,14 +50,18 @@ Configuring Raspberry Pi:
     run: mount -o remount,ro /boot
 
 
-12) automount USB storage
+12) automount USB storage and ttyUSB
     mkdir /storage
     scp raspbian/udev/80-usb_storage.rules root@192.168.10.103:/etc/udev/rules.d/
     scp raspbian/udev/mount_storage.sh root@192.168.10.103:/root/
     scp raspbian/udev/umount_storage.sh root@192.168.10.103:/root/
+    scp raspbian/udev/set_tty_usb_speed.sh root@192.168.10.103:/root/
 
     mkdir /etc/systemd/system/systemd-udevd.service.d
     scp raspbian/udev/enable_mounting.conf root@192.168.10.103:/etc/systemd/system/systemd-udevd.service.d/
+
+    rename /etc/udev/rules.d/99-com.rules to /etc/udev/rules.d/90-com.rules
+    scp raspbian/udev/91-tty_usb_speed.rules root@192.168.10.103:/etc/udev/rules.d/
 
     sudo systemctl daemon-reload
     sudo udevadm control --reload
@@ -81,14 +85,18 @@ Configuring Raspberry Pi:
         syntax on
 
 
-15) Set static IP /etc/dhcpcd.conf
+15) vim ~/.screenrc
+        vbell off
+
+
+16) Set static IP /etc/dhcpcd.conf
         interface eth0
         static ip_address=192.168.10.200/24
         static routers=192.168.10.1
         static domain_name_servers=192.168.10.1 8.8.8.8
 
 
-16) clone sources
+17) clone sources
     cd /root
     git clone https://github.com/stelhs/sr90_mbio.git
     cd sr90_mbio
@@ -99,12 +107,11 @@ Configuring Raspberry Pi:
     git checkout mbio4
 
 
-17) setup .gpios.json, .mbio_name, .server.json
-    cp /root/sr90_mbio/defaults/.* /root/sr90_mbio
-
-
 18) /etc/rc.local add:
         sleep 4
         screen -dmS mbio bash -c "cd /root/sr90_mbio; python3 -i mbio.py; exec bash"
         echo heartbeat >  /sys/class/leds/led0/trigger
 
+19) vim /etc/ssh/sshd_config and add:
+        GSSAPIAuthentication no
+        UseDNS no
