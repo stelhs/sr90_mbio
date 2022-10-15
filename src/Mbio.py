@@ -224,7 +224,7 @@ class Mbio():
         prevState = int(not prevState)
         port = s.portByGpioNum(gpio.num)
         s.log.debug("input event port %s" % port)
-        s.port.setCachedState(state)
+        port.setCachedState(state)
         s.sn.notify('portTriggered',
                     {'io_name': s.name(),
                      'pn': port.num(),
