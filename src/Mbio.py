@@ -245,9 +245,15 @@ class Mbio():
             if not port.name():
                 continue
 
+            try:
+                state = port.state()
+            except GpioError as e:
+                continue
+
             info = {'port_name': port.name(),
                     'type': port.mode(),
-                    'state': port.cachedState()}
+                    'state': state}
+
             if port.mode() == 'out':
                 if port.isBlinking():
                     with port._lock:
@@ -352,8 +358,8 @@ class Mbio():
             s.mbio = mbio
             s.httpServer = httpServer
             s.httpServer.setReqHandler("GET", "/io/output_set", s.outputSetHandler, ['pn', 'state'])
-            s.httpServer.setReqHandler("GET", "/io/output_get", s.portGetStateHandler, ['pn'])
-            s.httpServer.setReqHandler("GET", "/io/input_get", s.portGetStateHandler, ['pn'])
+            s.httpServer.setReqHandler("GET", "/io/sync_state", s.portGetSyncStateHandler, ['pn'])
+            s.httpServer.setReqHandler("GET", "/io/state", s.portGetStateHandler)
             s.httpServer.setReqHandler("GET", "/stat", s.statHandler)
             s.httpServer.setReqHandler("GET", "/reset", s.resetHandler)
 
@@ -407,17 +413,27 @@ class Mbio():
             return
 
 
-        def portGetStateHandler(s, args, conn):
+        def portGetSyncStateHandler(s, args, conn):
             pn = int(args['pn'])
             try:
                 port = s.mbio.portByNum(pn)
-                state = port.state()
-                port.setCachedState(state)
+                state = port.state(sync=True)
                 return {'state': state}
             except PortNotRegistredError as e:
                 raise HttpHandlerError("Port pn:%d is not registred" % pn)
             except GpioError as e:
                 raise HttpHandlerError("Can't get state: %s" % e)
+
+
+        def portGetStateHandler(s, args, conn):
+            list = {}
+            for port in s.mbio.ports():
+                try:
+                    state = port.state()
+                except GpioError as e:
+                    state = 'error'
+                list[port.pn()] = state
+            return {'states': list}
 
 
         def statHandler(s, args, conn):
@@ -504,7 +520,7 @@ class Port():
         s._edge = 'all'
         s.lastTrigTime = [0, 0]
         s.setDelay(0)
-        s._cachedState = s.state()
+        s._cachedState = None
 
 
     def num(s):
@@ -521,11 +537,9 @@ class Port():
         if mode == 'in':
             s.gpio.setMode('in')
             s.gpio.setEventCb(s.mbio.inputEventCb)
-            s._cachedState = s.state()
             return
         if mode == 'out':
             s.gpio.setMode('out')
-            s._cachedState = s.state()
             return
 
 
@@ -567,11 +581,17 @@ class Port():
             s.blinkStop()
 
         s.gpio.setValue(state)
-        s._cachedState = state
+        s.setCachedState(state)
+
+        s.mbio.sn.notify('portTriggered',
+                         {'io_name': s.mbio.name(),
+                          'pn': s.num(),
+                          'state': state})
+
         s.mbio.skynetPortsUpdater.call()
 
 
-    def state(s):
+    def state(s, sync=False):
         if s.gpio.mode() == "not_configured":
             return "not_configured"
 
@@ -579,17 +599,21 @@ class Port():
             if s.blinking:
                 return "blinking %s" % s.blinking
 
+        if not sync and s._cachedState != None:
+            return s._cachedState
+
         if s.gpio.mode() == 'in':
-            return int(not s.gpio.value())
-        return s.gpio.value()
+            state = int(not s.gpio.value())
+            s.setCachedState(state)
+            return state
+
+        state = s.gpio.value()
+        s.setCachedState(state)
+        return state
 
 
     def setCachedState(s, state):
         s._cachedState = state
-
-
-    def cachedState(s):
-        return s._cachedState
 
 
     def isBlinking(s):
