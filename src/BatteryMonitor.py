@@ -1,6 +1,7 @@
 import os, re, json
 from Task import *
 from AveragerQueue import *
+from Storage import *
 
 
 class BatteryMonitor():
@@ -13,10 +14,14 @@ class BatteryMonitor():
         s._prevVoltage = None
         s._prevCurrent = None
 
+        s.storage = Storage('battery_monitor.json', s.conf['storageDir'])
+        s.currentOffset = s.storage.key('/currentOffset', 2831)
+
         if not s.conf["enabled"]:
             return
 
         s.voltageQueue = AveragerQueue(10)
+        s.currentRawQueue = AveragerQueue(5)
         s.skynetUpdater = s.mbio.periodicNotifier.register("battery", s.skynetUpdateHandler, 2000)
 
         s.task = Task('battery_monitor')
@@ -50,8 +55,7 @@ class BatteryMonitor():
 
                         m = re.search('CH1:([0-9]+)', line)
                         if m:
-                            val = int(m.groups()[0]) - 2970 # 2970 - Current 0A
-                            c = round(val * c_step, 2)
+                            c = int(m.groups()[0])
                             continue
 
             except OSError as e:
@@ -66,8 +70,9 @@ class BatteryMonitor():
 
             with s.lock:
                 s.voltageQueue.push(v)
+                s.currentRawQueue.push(c)
                 s._voltage = s.voltageQueue.round()
-                s._current = c
+                s._current = round((s.currentRawQueue.round() - s.currentOffset.val) * c_step, 2)
 
             if s._voltage != s._prevVoltage or s._current != s._prevCurrent:
                 s.skynetUpdater.call()
@@ -77,6 +82,10 @@ class BatteryMonitor():
                 s._prevCurrent = s._current
                 v = None
                 c = None
+
+
+    def setZeroCurrent(s):
+        s.currentOffset.set(s.currentRawQueue.round())
 
 
     def emulateDo(s):

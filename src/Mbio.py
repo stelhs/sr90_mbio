@@ -362,6 +362,8 @@ class Mbio():
             s.httpServer.setReqHandler("GET", "/io/state", s.portGetStateHandler)
             s.httpServer.setReqHandler("GET", "/stat", s.statHandler)
             s.httpServer.setReqHandler("GET", "/reset", s.resetHandler)
+            if 'batteryMonitor' in mbio.conf.mbio:
+                s.httpServer.setReqHandler("GET", "/set_zero_charger_current", s.setZeroCurrentHandler)
 
 
         def outputSetHandler(s, args, conn):
@@ -447,6 +449,8 @@ class Mbio():
             Task.asyncRunSingle('setup_mbio', s.mbio.doSetup)
 
 
+        def setZeroCurrentHandler(s, args, conn):
+            s.mbio.batteryMon.setZeroCurrent()
 
 
 
