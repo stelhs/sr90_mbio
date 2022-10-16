@@ -1,1 +1,1 @@
-ACTION=="add", SUBSYSTEM=="usb-serial", RUN+="/bin/bash -c '/root/set_tty_usb_speed.sh'"
+ACTION=="add", SUBSYSTEM=="usb-serial", RUN+="/bin/bash -c '/etc/udev/rules.d/set_tty_usb_speed.sh'"

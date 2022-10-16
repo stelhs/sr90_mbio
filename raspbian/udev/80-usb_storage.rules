@@ -1,2 +1,2 @@
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_VENDOR}=="SanDisk", ENV{ID_MODEL}=="Cruzer_Facet", ENV{ID_SERIAL_SHORT}=="4C532000020607105251", RUN+="/bin/bash -c '/root/mount_storage.sh /storage'"
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_VENDOR}=="SanDisk", ENV{ID_MODEL}=="Cruzer_Facet", ENV{ID_SERIAL_SHORT}=="4C532000020607105251", RUN+="/bin/bash -c '/root/umount_storage.sh'"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_VENDOR}=="SanDisk", ENV{ID_MODEL}=="Cruzer_Facet", ENV{ID_SERIAL_SHORT}=="4C532000020607105251", RUN+="/bin/bash -c '/etc/udev/rules.d/mount_storage.sh /storage'"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_VENDOR}=="SanDisk", ENV{ID_MODEL}=="Cruzer_Facet", ENV{ID_SERIAL_SHORT}=="4C532000020607105251", RUN+="/bin/bash -c '/etc/udev/rules.d/umount_storage.sh'"

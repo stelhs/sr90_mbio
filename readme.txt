@@ -53,9 +53,9 @@ Configuring Raspberry Pi:
 12) automount USB storage and ttyUSB
     mkdir /storage
     scp raspbian/udev/80-usb_storage.rules root@192.168.10.103:/etc/udev/rules.d/
-    scp raspbian/udev/mount_storage.sh root@192.168.10.103:/root/
-    scp raspbian/udev/umount_storage.sh root@192.168.10.103:/root/
-    scp raspbian/udev/set_tty_usb_speed.sh root@192.168.10.103:/root/
+    scp raspbian/udev/mount_storage.sh root@192.168.10.103:/etc/udev/rules.d/
+    scp raspbian/udev/umount_storage.sh root@192.168.10.103:/etc/udev/rules.d/
+    scp raspbian/udev/set_tty_usb_speed.sh root@192.168.10.103:/etc/udev/rules.d/
 
     mkdir /etc/systemd/system/systemd-udevd.service.d
     scp raspbian/udev/enable_mounting.conf root@192.168.10.103:/etc/systemd/system/systemd-udevd.service.d/
@@ -115,3 +115,6 @@ Configuring Raspberry Pi:
 19) vim /etc/ssh/sshd_config and add:
         GSSAPIAuthentication no
         UseDNS no
+
+20) vim /etc/default/keyboard
+        XKBLAYOUT=”us”
