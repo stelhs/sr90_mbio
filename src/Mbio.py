@@ -531,7 +531,6 @@ class Port():
 
     def setMode(s, mode):
         s.log.debug("set mode %s" % mode)
-        s.reset()
 
         if s.isBlinking():
             s.blinkStop()
