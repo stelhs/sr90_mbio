@@ -58,7 +58,7 @@ class BatteryMonitor():
                             c = int(m.groups()[0])
                             continue
 
-            except OSError as e:
+            except (OSError, UnicodeDecodeError):
                 Task.sleep(1000)
                 with s.lock:
                     s._voltage = None
