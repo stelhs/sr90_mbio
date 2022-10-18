@@ -3,6 +3,9 @@ Configuring Raspberry Pi:
     cat 2021-10-30-raspios-bullseye-armhf-lite.zip | funzip | sudo dd of=/dev/mmcblk0 bs=4M conv=fsync status=progress
 
 2) run raspi-config and enable: sshd, w1-bus. set locale, timezone and overlay-fs
+        timedatectl set-timezone Europe/Minsk
+        ls -l /etc/localtime
+            lrwxrwxrwx 1 root root 34 Oct 18 04:03 /etc/localtime -> ../usr/share/zoneinfo/Europe/Minsk
 
 3) Configure overctl utility
     3.1) cp raspbian/overctl /usr/local/sbin
@@ -24,6 +27,7 @@ Configuring Raspberry Pi:
     lnav
     git
     screen
+    ntpdate
 
 6) Set root password:
     sudo passwd
@@ -65,6 +69,10 @@ Configuring Raspberry Pi:
 
     sudo systemctl daemon-reload
     sudo udevadm control --reload
+
+    scp raspbian/ntpdate.service root@192.168.10.103:/etc/systemd/system/
+    sudo systemctl daemon-reload
+    systemctl enable ntpdate.service
 
 
 13) vim ~/.bashrc
@@ -112,9 +120,20 @@ Configuring Raspberry Pi:
         screen -dmS mbio bash -c "cd /root/sr90_mbio; python3 -i mbio.py; exec bash"
         echo heartbeat >  /sys/class/leds/led0/trigger
 
+
 19) vim /etc/ssh/sshd_config and add:
         GSSAPIAuthentication no
         UseDNS no
 
 20) vim /etc/default/keyboard
         XKBLAYOUT=”us”
+
+21) Configure rsyslog logs forwarding
+        vim /etc/rsyslog.conf
+        add into begin of "RULES" section (before any rules):
+            *.*  @192.168.20.15:514
+            & stop
+
+22) vim /etc/systemd/journald.conf
+        SystemMaxUse=10M
+

@@ -1,0 +1,14 @@
+[Unit]
+Description=NTP update from time.google.com
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/bash -c 'until host example.com; do sleep 1; done'
+ExecStart=/usr/sbin/ntpdate time.google.com
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+
