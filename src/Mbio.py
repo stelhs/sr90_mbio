@@ -135,7 +135,6 @@ class Mbio():
                 for portNum, pInfo in conf['in'].items():
                     pn = int(portNum)
                     port = s.portByNum(pn)
-                    port.reset()
                     port.setMode('in')
                     port.setName(pInfo['name'])
                     if 'delay' in pInfo:
@@ -147,7 +146,6 @@ class Mbio():
                 for portNum, name in conf['out'].items():
                     pn = int(portNum)
                     port = s.portByNum(pn)
-                    port.reset()
                     port.setMode('out')
                     port.setName(name)
 
