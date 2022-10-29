@@ -125,15 +125,22 @@ Configuring Raspberry Pi:
         GSSAPIAuthentication no
         UseDNS no
 
-20) vim /etc/default/keyboard
+
+20) vim /etc/ssh/ssh_config and add:
+        TCPKeepAlive yes
+        ServerAliveInterval 10
+        ServerAliveCountMax 2
+
+
+21) vim /etc/default/keyboard
         XKBLAYOUT=”us”
 
-21) Configure rsyslog logs forwarding
+22) Configure rsyslog logs forwarding
         vim /etc/rsyslog.conf
         add into begin of "RULES" section (before any rules):
             *.*  @192.168.20.15:514
             & stop
 
-22) vim /etc/systemd/journald.conf
+23) vim /etc/systemd/journald.conf
         SystemMaxUse=10M
 
