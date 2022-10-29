@@ -596,10 +596,6 @@ class Port():
         if s.gpio.mode() == "not_configured":
             return "not_configured"
 
-        with s._lock:
-            if s.blinking:
-                return "blinking %s" % s.blinking
-
         if not sync and s._cachedState != None:
             return s._cachedState
 
