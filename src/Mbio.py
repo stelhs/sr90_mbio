@@ -11,9 +11,9 @@ from SkynetNotifier import *
 from BatteryMonitor import *
 from Gpio import *
 from PeriodicNotifier import *
-import json
+from HttpClient import *
+from GsmModem import *
 import os, re
-import requests
 
 
 
@@ -49,6 +49,13 @@ class Mbio():
         s.httpServer = HttpServer(s.conf.mbio['host'],
                                   s.conf.mbio['port'])
         s.httpHandlers = Mbio.HttpHandlers(s, s.httpServer)
+        s.skynetClient = HttpClient('mbio', s.conf.mbio['skynetServer']['host'],
+                                            s.conf.mbio['skynetServer']['port'])
+
+        s.modem = None
+        if 'modemHuaweiE353' in s.conf.mbio:
+            s.modem = GsmModem(s)
+
         Task.asyncRunSingle('setup_mbio', s.doSetup)
 
 
@@ -289,40 +296,16 @@ class Mbio():
 
 
 
-    def serverRequest(s, url, args = None):
+    def skynetRequest(s, op, args = None):
         try:
-            url = "http://%s:%d/%s" % (s.conf.mbio['skynetServer']['host'],
-                                       s.conf.mbio['skynetServer']['port'], url)
-        except KeyError as e:
-            raise SkynetServerConfigError(s.log,
-                    "Server configuration error: filed %s is absent" % e)
-
-        try:
-            r = requests.get(url = url, params = args)
-            d = r.json()
-            if d['status'] == 'ok':
-                return d
-            reason = d['reason']
-            raise SkynetServerResponceError(s.log,
-                    "Request '%s' to skynet server received error: %s" % (
-                            url, reason))
-        except requests.RequestException as e:
-            raise SkynetServerNetworkError(s.log,
-                    "GET request '%s' to skynet server fails: %s" % (
-                            url, e)) from e
-        except json.JSONDecodeError as e:
-            raise SkynetServerNetworkError(s.log,
-                    "Response for '%s' from skynet server parse error: %s" % (
-                            url, e)) from e
-        except KeyError as e:
-            raise SkynetServerResponceError(s.log,
-                    "Request '%s' to skynet server return incorrect json: %s" % (
-                            url, r))
+            return s.skynetClient.reqGet(op, args)
+        except HttpClient.Error as e:
+            raise SkynetServerConfigError(s.log, e) from e
 
 
     def mbioConfig(s):
         try:
-            d = s.serverRequest('io/port_config', {'io': s.name()})
+            d = s.skynetRequest('io/port_config', {'io': s.name()})
             return d['config']
         except KeyError as e:
             raise SkynetServerResponceError(s.log,
@@ -331,7 +314,7 @@ class Mbio():
 
     def termosensorsConfig(s):
         try:
-            d = s.serverRequest('io/termosensor_config', {'io': s.name()})
+            d = s.skynetRequest('io/termosensor_config', {'io': s.name()})
             return d['list']
         except KeyError as e:
             raise SkynetServerResponceError(s.log,
@@ -340,7 +323,7 @@ class Mbio():
 
     def outPortStates(s):
         try:
-            d = s.serverRequest('io/out_port_states', {'io': s.name()})
+            d = s.skynetRequest('io/out_port_states', {'io': s.name()})
             return d['listStates']
         except KeyError as e:
             raise SkynetServerResponceError(s.log,

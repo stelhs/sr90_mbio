@@ -37,4 +37,8 @@ class SkynetNotifierResponseError(SkynetNotifierError):
     pass
 
 
+# Huawei modem E353 errors
+
+class HuaweiModemE353Error(AppError):
+    pass
 
