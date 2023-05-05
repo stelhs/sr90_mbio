@@ -15,6 +15,8 @@ mbio = Mbio()
 def exitCb():
     print("call exitCb")
     mbio.destroy()
+atexit.register(exitCb)
+
 
 
 print("help:")
