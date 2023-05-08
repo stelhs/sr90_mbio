@@ -300,7 +300,7 @@ class Mbio():
         try:
             return s.skynetClient.reqGet(op, args)
         except HttpClient.Error as e:
-            raise SkynetServerConfigError(s.log, e) from e
+            raise SkynetServerNetworkError(s.log, e) from e
 
 
     def mbioConfig(s):

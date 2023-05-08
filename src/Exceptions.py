@@ -14,9 +14,6 @@ class SkynetServerError(AppError):
 class SkynetServerNetworkError(SkynetServerError):
     pass
 
-class SkynetServerConfigError(SkynetServerError):
-    pass
-
 class SkynetServerResponceError(SkynetServerError):
     pass
 

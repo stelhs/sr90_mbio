@@ -3,7 +3,7 @@ sys.path.append('sr90lib/')
 sys.path.append('src/')
 
 from math import *
-import rlcompleter, readline
+import rlcompleter, readline, atexit
 readline.parse_and_bind('tab:complete')
 
 
