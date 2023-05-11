@@ -59,6 +59,11 @@ class Mbio():
         Task.asyncRunSingle('setup_mbio', s.doSetup)
 
 
+    def toAdmin(s, msg):
+        s.tc.sendToChat('stelhs', "%s: %s" % (s.name(), msg))
+
+
+
     def initGpios(s):
         if s.state() != 'started':
             return
@@ -71,8 +76,7 @@ class Mbio():
 
 
     def taskExceptionHandler(s, task, errMsg):
-        s.tc.sendToChat('stelhs',
-                "%s: task '%s' error:\n%s" % (s.name(), task.name(), errMsg))
+        s.toAdmin("%s: task '%s' error:\n%s" % (s.name(), task.name(), errMsg))
 
 
     def setState(s, state):
@@ -178,7 +182,8 @@ class Mbio():
                 tSensor.destroy()
             s.termosensors = []
 
-            s.termosensors = [TermoSensorDs18b20(addr, s.termosensorHandler) for addr in conf]
+            s.termosensors = [TermoSensorDs18b20(sn['addr'], s.termosensorHandler,
+                              sn['min'], sn['max']) for sn in conf]
             s.log.info("thermosensors successfully configured")
             return
 
@@ -237,8 +242,9 @@ class Mbio():
         s.skynetPortsUpdater.call()
 
 
-    def termosensorHandler(s, ts, t):
-        s.skynetTermoUpdater.call()
+    def termosensorHandler(s, ts, t, err):
+        if t != None:
+            s.skynetTermoUpdater.call()
 
 
     def skynetUpdatePortsHandler(s):
@@ -277,7 +283,10 @@ class Mbio():
     def skynetUpdateTermoHandler(s):
         termosensors = {}
         for ts in s.termosensors:
-            termosensors[ts.addr()] = ts.t()
+            try:
+                termosensors[ts.addr()] = ts.t()
+            except TermoSensorDs18b20.Error as e:
+                s.log.err("termosensor %s error: %s" % (ts.addr(), e))
 
         s.sn.notify('termoStates',
                     {'io_name': s.name(),
